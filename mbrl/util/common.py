@@ -92,10 +92,14 @@ def create_one_dim_tr_model(
         obs_process_fn = hydra.utils.get_method(cfg.overrides.obs_process_fn)
     else:
         obs_process_fn = None
+
+    if cfg.algorithm.get("target_normalize", None) is None:
+        cfg.algorithm.target_normalize = False
     dynamics_model = mbrl.models.OneDTransitionRewardModel(
         model,
         target_is_delta=cfg.algorithm.target_is_delta,
         normalize=cfg.algorithm.normalize,
+        target_normalize=cfg.algorithm.target_normalize,
         normalize_double_precision=cfg.algorithm.get(
             "normalize_double_precision", False
         ),

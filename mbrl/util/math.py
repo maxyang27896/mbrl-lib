@@ -173,6 +173,87 @@ class Normalizer:
                 {"mean": self.mean.cpu().numpy(), "std": self.std.cpu().numpy()}, f
             )
 
+    class LinearScaler:
+        """Class that keeps a running min and max and normalizes data accordingly.
+
+        The statistics kept are stored in torch tensors.
+
+        Args:
+            in_size (int): the size of the data that will be normalized.
+            device (torch.device): the device in which the data will reside.
+            dtype (torch.dtype): the data type to use for the normalizer.
+        """
+
+        _STATS_FNAME = "env_stats.pickle"
+
+        def __init__(self, in_size: int, device: torch.device, dtype=torch.float32):
+            self.min = torch.zeros((1, in_size), device=device, dtype=dtype)
+            self.max = torch.ones((1, in_size), device=device, dtype=dtype)
+            self.eps = 1e-12 if dtype == torch.double else 1e-5
+            self.device = device
+
+        def update_stats(self, min_values: mbrl.types.TensorType, max_values: mbrl.types.TensorType):
+            """Updates the stored statistics using the given data.
+
+            Equivalent to `self.stats.mean = data.mean(0) and self.stats.std = data.std(0)`.
+
+            Args:
+                data (np.ndarray or torch.Tensor): The data used to compute the statistics.
+            """
+            assert min_values.ndim == 1 and max_values.ndim == 1
+            if isinstance(data, np.ndarray):
+                data = torch.from_numpy(data).to(self.device)
+            self.min = data.mean(0, keepdim=True)
+            self.max = data.std(0, keepdim=True)
+            self.min[(self.max-self.min) < self.eps] = 0
+            self.max[(self.max-self.min) < self.eps] = 1
+
+        def normalize(self, val: Union[float, mbrl.types.TensorType]) -> torch.Tensor:
+            """Normalizes the value according to the stored statistics.
+
+            Equivalent to (val - mu) / sigma, where mu and sigma are the stored mean and
+            standard deviation, respectively.
+
+            Args:
+                val (float, np.ndarray or torch.Tensor): The value to normalize.
+
+            Returns:
+                (torch.Tensor): The normalized value.
+            """
+            if isinstance(val, np.ndarray):
+                val = torch.from_numpy(val).to(self.device)
+            return (val - self.min) / (self.max - self.min)
+
+        def denormalize(self, val: Union[float, mbrl.types.TensorType]) -> torch.Tensor:
+            """De-normalizes the value according to the stored statistics.
+
+            Equivalent to sigma * val + mu, where mu and sigma are the stored mean and
+            standard deviation, respectively.
+
+            Args:
+                val (float, np.ndarray or torch.Tensor): The value to de-normalize.
+
+            Returns:
+                (torch.Tensor): The de-normalized value.
+            """
+            if isinstance(val, np.ndarray):
+                val = torch.from_numpy(val).to(self.device)
+            return val * (self.max - self.min) + self.min
+
+        def load(self, results_dir: Union[str, pathlib.Path]):
+            """Loads saved statistics from the given path."""
+            with open(pathlib.Path(results_dir) / self._STATS_FNAME, "rb") as f:
+                stats = pickle.load(f)
+                self.min = torch.from_numpy(stats["min"]).to(self.device)
+                self.max = torch.from_numpy(stats["max"]).to(self.device)
+
+        def save(self, save_dir: Union[str, pathlib.Path]):
+            """Saves stored statistics to the given path."""
+            save_dir = pathlib.Path(save_dir)
+            with open(save_dir / self._STATS_FNAME, "wb") as f:
+                pickle.dump(
+                    {"min": self.min.cpu().numpy(), "max": self.max.cpu().numpy()}, f
+                )
 
 # ------------------------------------------------------------------------ #
 # Uncertainty propagation functions
@@ -424,3 +505,56 @@ def quantize_obs(
             *obs.shape
         )
     return quantized_obs
+
+
+# ------------------------------------------------------------------------ #
+# Coordinate transformations
+# ------------------------------------------------------------------------ #
+
+def euler_to_quaternion(euler: torch.Tensor) -> torch.Tensor:
+    ''' 
+    Convert a batch of euler angles to a batch of 4 dimenstional quaternian
+    
+    Args:
+        euler (torch.tensor): a batch of euler vectors = [roll, pitch, yaw]
+
+    Returns:
+        (torch.tensor): a batch of quaternion
+    '''
+    qx = torch.sin(euler[:, 0]/2) * torch.cos(euler[:, 1]/2) * torch.cos(euler[:, 2]/2) - torch.cos(euler[:, 0]/2) * torch.sin(euler[:, 1]/2) * torch.sin(euler[:, 2]/2)
+    qy = torch.cos(euler[:, 0]/2) * torch.sin(euler[:, 1]/2) * torch.cos(euler[:, 2]/2) + torch.sin(euler[:, 0]/2) * torch.cos(euler[:, 1]/2) * torch.sin(euler[:, 2]/2)
+    qz = torch.cos(euler[:, 0]/2) * torch.cos(euler[:, 1]/2) * torch.sin(euler[:, 2]/2) - torch.sin(euler[:, 0]/2) * torch.sin(euler[:, 1]/2) * torch.cos(euler[:, 2]/2)
+    qw = torch.cos(euler[:, 0]/2) * torch.cos(euler[:, 1]/2) * torch.cos(euler[:, 2]/2) + torch.sin(euler[:, 0]/2) * torch.sin(euler[:, 1]/2) * torch.sin(euler[:, 2]/2)
+
+    return torch.stack([qx, qy, qz, qw], 1)
+
+def quaternion_rotation_matrix(quaternion: torch.Tensor) -> torch.Tensor:
+    """
+    Covert a batch of quaternion into a full three-dimensional rotation matrix.
+ 
+    Input
+    :param Q: A batch of 4 element array representing the quaternion (q0,q1,q2,q3) 
+ 
+    Output
+    :return: A nx9 element matrix representing the full 3D rotation matrix. 
+             This rotation matrix converts a point in the local reference 
+             frame to a point in the global reference frame.
+    """
+    d = quaternion[:, 0] * quaternion[:, 0] + quaternion[:, 1] * quaternion[:, 1] + quaternion[:, 2] * quaternion[:, 2] + quaternion[:, 3] * quaternion[:, 3]
+    s = 2.0 / d
+    xs = quaternion[:, 0] * s
+    ys = quaternion[:, 1] * s
+    zs = quaternion[:, 2] * s
+    wx = quaternion[:, 3] * xs
+    wy = quaternion[:, 3] * ys
+    wz = quaternion[:, 3] * zs
+    xx = quaternion[:, 0] * xs
+    xy = quaternion[:, 0] * ys
+    xz = quaternion[:, 0] * zs
+    yy = quaternion[:, 1] * ys
+    yz = quaternion[:, 1] * zs
+    zz = quaternion[:, 2] * zs
+    
+    return torch.stack([1.0 - (yy + zz), xy - wz, xz + wy,
+                        xy + wz, 1.0 - (xx + zz), yz - wx,
+                        xz - wy, yz + wx, 1.0 - (xx + yy)], 1)

@@ -75,6 +75,7 @@ class OneDTransitionRewardModel(Model):
         model: Model,
         target_is_delta: bool = True,
         normalize: bool = False,
+        target_normalize: bool = False,
         normalize_double_precision: bool = False,
         learned_rewards: bool = True,
         obs_process_fn: Optional[mbrl.types.ObsProcessFnType] = None,
@@ -87,6 +88,13 @@ class OneDTransitionRewardModel(Model):
         if normalize:
             self.input_normalizer = mbrl.util.math.Normalizer(
                 self.model.in_size,
+                self.model.device,
+                dtype=torch.double if normalize_double_precision else torch.float,
+            )
+        self.target_normalizer: Optional[mbrl.util.math.Normalizer] = None
+        if target_normalize:
+                self.target_normalizer = mbrl.util.math.Normalizer(
+                self.model.out_size,
                 self.model.device,
                 dtype=torch.double if normalize_double_precision else torch.float,
             )
@@ -126,6 +134,10 @@ class OneDTransitionRewardModel(Model):
         else:
             target_obs = next_obs
         target_obs = model_util.to_tensor(target_obs).to(self.device)
+        
+        if self.target_normalizer:
+            # Normalise the target here
+            target_obs = self.target_normalizer.normalize(target_obs).float().to(self.device)
 
         model_in = self._get_model_input(obs, action)
         if self.learned_rewards:
@@ -150,16 +162,24 @@ class OneDTransitionRewardModel(Model):
             batch (:class:`mbrl.types.TransitionBatch`): The batch of transition data.
                 Only obs and action will be used, since these are the inputs to the model.
         """
-        if self.input_normalizer is None:
+        if (self.input_normalizer is None) and (self.target_normalizer is None):
             return
-        obs, action = batch.obs, batch.act
+        obs, action, next_obs = batch.obs, batch.act, batch.next_obs 
         if obs.ndim == 1:
             obs = obs[None, :]
             action = action[None, :]
+            next_obs = next_obs[None, :]
         if self.obs_process_fn:
             obs = self.obs_process_fn(obs)
-        model_in_np = np.concatenate([obs, action], axis=obs.ndim - 1)
-        self.input_normalizer.update_stats(model_in_np)
+            next_obs = self.obs_process_fn(next_obs)
+
+        if (self.input_normalizer):
+            model_in_np = np.concatenate([obs, action], axis=obs.ndim - 1)
+            self.input_normalizer.update_stats(model_in_np)
+        
+        if (self.target_normalizer):
+            target_obs = next_obs - obs
+            self.target_normalizer.update_stats(target_obs)
 
     def loss(
         self,
@@ -278,6 +298,10 @@ class OneDTransitionRewardModel(Model):
         preds, next_model_state = self.model.sample_1d(
             model_in, model_state, rng=rng, deterministic=deterministic
         )
+        # Denormalise preds
+        if self.target_normalizer:
+            preds = self.target_normalizer.denormalize(preds)
+
         next_observs = preds[:, :-1] if self.learned_rewards else preds
         if self.target_is_delta:
             tmp_ = next_observs + obs

@@ -14,7 +14,7 @@ from torch.nn import functional as F
 import mbrl.util.math
 
 from .model import Ensemble
-from .util import EnsembleLinearLayer, truncated_normal_init
+from .util import EnsembleLinearLayer, truncated_normal_init, normal_init
 
 
 class GaussianMLP(Ensemble):
@@ -121,7 +121,11 @@ class GaussianMLP(Ensemble):
                 0.5 * torch.ones(1, out_size), requires_grad=learn_logvar_bounds
             )
 
+        # Apply default init
         self.apply(truncated_normal_init)
+
+        # Apply custom init
+        # self.apply(normal_init)
         self.to(self.device)
 
         self.elite_models: List[int] = None
