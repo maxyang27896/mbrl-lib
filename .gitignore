@@ -5,6 +5,7 @@ exp/
 .idea
 .mypy_cache
 notebooks/.ipynb_checkpoints
+notebooks/saved_model
 _build
 __pycache__
 

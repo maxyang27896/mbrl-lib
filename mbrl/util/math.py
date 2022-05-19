@@ -173,87 +173,90 @@ class Normalizer:
                 {"mean": self.mean.cpu().numpy(), "std": self.std.cpu().numpy()}, f
             )
 
-    class LinearScaler:
-        """Class that keeps a running min and max and normalizes data accordingly.
+class LinearScaler:
+    """Class that keeps a running min and max and normalizes data accordingly.
 
-        The statistics kept are stored in torch tensors.
+    The statistics kept are stored in torch tensors.
+
+    Args:
+        in_size (int): the size of the data that will be normalized.
+        device (torch.device): the device in which the data will reside.
+        dtype (torch.dtype): the data type to use for the normalizer.
+    """
+
+    _STATS_FNAME = "env_stats.pickle"
+
+    def __init__(self, in_size: int, device: torch.device, dtype=torch.float32):
+        self.min = torch.zeros((1, in_size), device=device, dtype=dtype)
+        self.max = torch.ones((1, in_size), device=device, dtype=dtype)
+        self.lower_bound = torch.zeros((1, in_size), device=device, dtype=dtype)
+        self.upper_bound = torch.ones((1, in_size), device=device, dtype=dtype)
+        self.bound = self.upper_bound - self.lower_bound
+        self.eps = 1e-12 if dtype == torch.double else 1e-5
+        self.device = device
+
+    def update_stats(self, data: mbrl.types.TensorType):
+        """Updates the stored statistics using the given data.
+
+        Equivalent to `self.stats.mean = data.mean(0) and self.stats.std = data.std(0)`.
 
         Args:
-            in_size (int): the size of the data that will be normalized.
-            device (torch.device): the device in which the data will reside.
-            dtype (torch.dtype): the data type to use for the normalizer.
+            data (np.ndarray or torch.Tensor): The data used to compute the statistics.
         """
+        assert data.ndim == 2 and data.shape[1] == self.min.shape[1] and data.shape[1] == self.max.shape[1]
+        if isinstance(data, np.ndarray):
+            data = torch.from_numpy(data).to(self.device)
+        self.min = data.min(0, keepdim=True).values
+        self.max = data.max(0, keepdim=True).values
+        self.min[(self.max-self.min) < self.eps] = 0
+        self.max[(self.max-self.min) < self.eps] = 1
 
-        _STATS_FNAME = "env_stats.pickle"
+    def normalize(self, val: Union[float, mbrl.types.TensorType]) -> torch.Tensor:
+        """Normalizes the value according to the stored statistics.
 
-        def __init__(self, in_size: int, device: torch.device, dtype=torch.float32):
-            self.min = torch.zeros((1, in_size), device=device, dtype=dtype)
-            self.max = torch.ones((1, in_size), device=device, dtype=dtype)
-            self.eps = 1e-12 if dtype == torch.double else 1e-5
-            self.device = device
+        Equivalent to (val - mu) / sigma, where mu and sigma are the stored mean and
+        standard deviation, respectively.
 
-        def update_stats(self, min_values: mbrl.types.TensorType, max_values: mbrl.types.TensorType):
-            """Updates the stored statistics using the given data.
+        Args:
+            val (float, np.ndarray or torch.Tensor): The value to normalize.
 
-            Equivalent to `self.stats.mean = data.mean(0) and self.stats.std = data.std(0)`.
+        Returns:
+            (torch.Tensor): The normalized value.
+        """
+        if isinstance(val, np.ndarray):
+            val = torch.from_numpy(val).to(self.device)
+        return (val - self.min) / (self.max - self.min) * self.bound + self.lower_bound
 
-            Args:
-                data (np.ndarray or torch.Tensor): The data used to compute the statistics.
-            """
-            assert min_values.ndim == 1 and max_values.ndim == 1
-            if isinstance(data, np.ndarray):
-                data = torch.from_numpy(data).to(self.device)
-            self.min = data.mean(0, keepdim=True)
-            self.max = data.std(0, keepdim=True)
-            self.min[(self.max-self.min) < self.eps] = 0
-            self.max[(self.max-self.min) < self.eps] = 1
+    def denormalize(self, val: Union[float, mbrl.types.TensorType]) -> torch.Tensor:
+        """De-normalizes the value according to the stored statistics.
 
-        def normalize(self, val: Union[float, mbrl.types.TensorType]) -> torch.Tensor:
-            """Normalizes the value according to the stored statistics.
+        Equivalent to sigma * val + mu, where mu and sigma are the stored mean and
+        standard deviation, respectively.
 
-            Equivalent to (val - mu) / sigma, where mu and sigma are the stored mean and
-            standard deviation, respectively.
+        Args:
+            val (float, np.ndarray or torch.Tensor): The value to de-normalize.
 
-            Args:
-                val (float, np.ndarray or torch.Tensor): The value to normalize.
+        Returns:
+            (torch.Tensor): The de-normalized value.
+        """
+        if isinstance(val, np.ndarray):
+            val = torch.from_numpy(val).to(self.device)
+        return (val - self.lower_bound) * (self.max - self.min) / self.bound + self.min
 
-            Returns:
-                (torch.Tensor): The normalized value.
-            """
-            if isinstance(val, np.ndarray):
-                val = torch.from_numpy(val).to(self.device)
-            return (val - self.min) / (self.max - self.min)
+    def load(self, results_dir: Union[str, pathlib.Path]):
+        """Loads saved statistics from the given path."""
+        with open(pathlib.Path(results_dir) / self._STATS_FNAME, "rb") as f:
+            stats = pickle.load(f)
+            self.min = torch.from_numpy(stats["min"]).to(self.device)
+            self.max = torch.from_numpy(stats["max"]).to(self.device)
 
-        def denormalize(self, val: Union[float, mbrl.types.TensorType]) -> torch.Tensor:
-            """De-normalizes the value according to the stored statistics.
-
-            Equivalent to sigma * val + mu, where mu and sigma are the stored mean and
-            standard deviation, respectively.
-
-            Args:
-                val (float, np.ndarray or torch.Tensor): The value to de-normalize.
-
-            Returns:
-                (torch.Tensor): The de-normalized value.
-            """
-            if isinstance(val, np.ndarray):
-                val = torch.from_numpy(val).to(self.device)
-            return val * (self.max - self.min) + self.min
-
-        def load(self, results_dir: Union[str, pathlib.Path]):
-            """Loads saved statistics from the given path."""
-            with open(pathlib.Path(results_dir) / self._STATS_FNAME, "rb") as f:
-                stats = pickle.load(f)
-                self.min = torch.from_numpy(stats["min"]).to(self.device)
-                self.max = torch.from_numpy(stats["max"]).to(self.device)
-
-        def save(self, save_dir: Union[str, pathlib.Path]):
-            """Saves stored statistics to the given path."""
-            save_dir = pathlib.Path(save_dir)
-            with open(save_dir / self._STATS_FNAME, "wb") as f:
-                pickle.dump(
-                    {"min": self.min.cpu().numpy(), "max": self.max.cpu().numpy()}, f
-                )
+    def save(self, save_dir: Union[str, pathlib.Path]):
+        """Saves stored statistics to the given path."""
+        save_dir = pathlib.Path(save_dir)
+        with open(save_dir / self._STATS_FNAME, "wb") as f:
+            pickle.dump(
+                {"min": self.min.cpu().numpy(), "max": self.max.cpu().numpy()}, f
+            )
 
 # ------------------------------------------------------------------------ #
 # Uncertainty propagation functions

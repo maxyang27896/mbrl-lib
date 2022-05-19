@@ -91,13 +91,23 @@ class OneDTransitionRewardModel(Model):
                 self.model.device,
                 dtype=torch.double if normalize_double_precision else torch.float,
             )
+            # self.input_normalizer = mbrl.util.math.LinearScaler(
+            #     self.model.in_size,
+            #     self.model.device,
+            #     dtype=torch.double if normalize_double_precision else torch.float,
+            # )
         self.target_normalizer: Optional[mbrl.util.math.Normalizer] = None
         if target_normalize:
-                self.target_normalizer = mbrl.util.math.Normalizer(
+            self.target_normalizer = mbrl.util.math.Normalizer(
                 self.model.out_size,
                 self.model.device,
                 dtype=torch.double if normalize_double_precision else torch.float,
             )
+            # self.target_normalizer = mbrl.util.math.LinearScaler(
+            #     self.model.out_size,
+            #     self.model.device,
+            #     dtype=torch.double if normalize_double_precision else torch.float,
+            # )
         self.device = self.model.device
         self.learned_rewards = learned_rewards
         self.target_is_delta = target_is_delta
@@ -178,7 +188,10 @@ class OneDTransitionRewardModel(Model):
             self.input_normalizer.update_stats(model_in_np)
         
         if (self.target_normalizer):
-            target_obs = next_obs - obs
+            if self.target_is_delta:
+                target_obs = next_obs - obs
+            else:
+                target_obs = next_obs
             self.target_normalizer.update_stats(target_obs)
 
     def loss(
