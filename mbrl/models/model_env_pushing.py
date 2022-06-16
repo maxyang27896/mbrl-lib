@@ -158,9 +158,9 @@ class ModelEnvPushing:
         environment.
         '''
         self.targ_traj_list_id = torch.tensor(self.env.targ_traj_list_id).to(self.device)
-        # TODO
-        if self.targ_traj_list_id>=1:
-            print(self.env.targ_traj_list_id)
+        # # TODO
+        # if self.targ_traj_list_id>=1:
+        #     print(self.env.targ_traj_list_id)
         if self.targ_traj_list_id < 0:
             print("Error targ_traj_list_id is below 0, the gym environment has not been reset.")
         
