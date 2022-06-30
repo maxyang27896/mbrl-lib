@@ -56,6 +56,7 @@ class ModelEnvPushing:
         self.observation_mode = env.observation_mode
         self.termination_pos_dist = env.termination_pos_dist
         self.terminate_early = env.terminate_early
+        self.terminated_early_penalty = env.terminated_early_penalty
         self.traj_n_points = env.traj_n_points
         self.TCP_lims = env.robot.arm.TCP_lims
 
@@ -136,7 +137,7 @@ class ModelEnvPushing:
                 if self.reward_fn is None
                 else self.reward_fn(actions, next_observs)
             )
-            dones = self.termination_fn(actions, next_observs)
+            dones = self.termination_fn(actions, next_observs, rewards)
 
             if pred_terminals is not None:
                 raise NotImplementedError(
@@ -186,6 +187,7 @@ class ModelEnvPushing:
         Function to check if either object or tcp postion is outside of the 
         TCP limit
         '''
+        # xyz_tcp_dist_to_obj = torch.linalg.norm(tcp_pos_workframe - cur_obj_pos_workframe)
         return ((tcp_pos_workframe[:, 0] < self.TCP_lims[0,0]) | 
             (tcp_pos_workframe[:, 0] > self.TCP_lims[0,1]) | 
             (tcp_pos_workframe[:, 1] < self.TCP_lims[1,0]) | 
@@ -194,11 +196,13 @@ class ModelEnvPushing:
             (cur_obj_pos_workframe[:, 0] > self.TCP_lims[0,1]) | 
             (cur_obj_pos_workframe[:, 1] < self.TCP_lims[1,0]) | 
             (cur_obj_pos_workframe[:, 1] > self.TCP_lims[1,1]))
+            # (xyz_tcp_dist_to_obj > self.env.obj_width / 2))           # TODO: exiting episode when roughly lose contact
 
     def termination(
         self, 
         act: torch.Tensor, 
-        next_obs: torch.Tensor
+        next_obs: torch.Tensor,
+        rewards: torch.Tensor,
         ) -> torch.Tensor:
         """
         Criteria for terminating an episode. Should return a vector of dones of size 
@@ -259,7 +263,9 @@ class ModelEnvPushing:
 
         # Early termination if outside of the tcp limits
         if self.terminate_early:
-            terminated[self.outside_tcp_lims(tcp_pos_workframe, cur_obj_pos_workframe)] = True
+            outside_tcp_lims_idx = self.outside_tcp_lims(tcp_pos_workframe, cur_obj_pos_workframe)
+            terminated[outside_tcp_lims_idx] = True
+            rewards[outside_tcp_lims_idx] += self.terminated_early_penalty        # Add a penalty for exiting the TCP limits
         
         # Update goal position batch for none terminated samples
         self.goal_pos_workframe_batch[~terminated[:,0]] = self.traj_pos_workframe[self.targ_traj_list_id_batch[~terminated[:,0]]]
