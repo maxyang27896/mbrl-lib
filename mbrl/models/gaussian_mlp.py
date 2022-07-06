@@ -390,8 +390,11 @@ class GaussianMLP(Ensemble):
         }
         torch.save(model_dict, pathlib.Path(save_dir) / self._MODEL_FNAME)
 
-    def load(self, load_dir: Union[str, pathlib.Path]):
+    def load(self, load_dir: Union[str, pathlib.Path], map_location=None):
         """Loads the model from the given path."""
-        model_dict = torch.load(pathlib.Path(load_dir) / self._MODEL_FNAME)
+        if map_location:
+            model_dict = torch.load(pathlib.Path(load_dir) / self._MODEL_FNAME, map_location=map_location)
+        else:
+            model_dict = torch.load(pathlib.Path(load_dir) / self._MODEL_FNAME)
         self.load_state_dict(model_dict["state_dict"])
         self.elite_models = model_dict["elite_models"]
