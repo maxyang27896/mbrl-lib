@@ -353,8 +353,11 @@ class OneDTransitionRewardModel(Model):
         if self.input_normalizer:
             self.input_normalizer.save(save_dir)
 
-    def load(self, load_dir: Union[str, pathlib.Path]):
-        self.model.load(load_dir)
+    def load(self, load_dir: Union[str, pathlib.Path], map_location=None):
+        if map_location:
+            self.model.load(load_dir, map_location)
+        else:
+            self.model.load(load_dir)
         if self.input_normalizer:
             self.input_normalizer.load(load_dir)
 

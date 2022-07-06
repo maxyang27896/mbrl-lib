@@ -239,9 +239,12 @@ class Model(nn.Module, abc.ABC):
         """Saves the model to the given directory."""
         torch.save(self.state_dict(), pathlib.Path(save_dir) / self._MODEL_FNAME)
 
-    def load(self, load_dir: Union[str, pathlib.Path]):
+    def load(self, load_dir: Union[str, pathlib.Path],  map_location=None):
         """Loads the model from the given path."""
-        self.load_state_dict(torch.load(pathlib.Path(load_dir) / self._MODEL_FNAME))
+        if map_location:
+            self.load_state_dict(torch.load(pathlib.Path(load_dir) / self._MODEL_FNAME, map_location=map_location))
+        else:
+            self.load_state_dict(torch.load(pathlib.Path(load_dir) / self._MODEL_FNAME))
 
 
 # ---------------------------------------------------------------------------
