@@ -89,6 +89,7 @@ class OneDTransitionRewardModel(Model):
             self.input_normalizer = mbrl.util.math.Normalizer(
                 self.model.in_size,
                 self.model.device,
+                "input",
                 dtype=torch.double if normalize_double_precision else torch.float,
             )
             # self.input_normalizer = mbrl.util.math.LinearScaler(
@@ -101,6 +102,7 @@ class OneDTransitionRewardModel(Model):
             self.target_normalizer = mbrl.util.math.Normalizer(
                 self.model.out_size,
                 self.model.device,
+                "output",
                 dtype=torch.double if normalize_double_precision else torch.float,
             )
             # self.target_normalizer = mbrl.util.math.LinearScaler(
@@ -352,6 +354,8 @@ class OneDTransitionRewardModel(Model):
         self.model.save(save_dir)
         if self.input_normalizer:
             self.input_normalizer.save(save_dir)
+        if self.target_normalizer:
+            self.target_normalizer.save(save_dir)
 
     def load(self, load_dir: Union[str, pathlib.Path], map_location=None):
         if map_location:
@@ -360,6 +364,8 @@ class OneDTransitionRewardModel(Model):
             self.model.load(load_dir)
         if self.input_normalizer:
             self.input_normalizer.load(load_dir)
+        if self.target_normalizer:
+            self.target_normalizer.load(load_dir)
 
     def set_elite(self, elite_indices: Sequence[int]):
         self.model.set_elite(elite_indices)
