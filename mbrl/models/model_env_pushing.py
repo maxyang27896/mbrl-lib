@@ -59,6 +59,7 @@ class ModelEnvPushing:
         self.terminated_early_penalty = env.terminated_early_penalty
         self.traj_n_points = env.traj_n_points
         self.TCP_lims = env.robot.arm.TCP_lims
+        self.task = env.task
         self.planar_states = env.planar_states
 
         self._current_obs: torch.Tensor = None
@@ -172,31 +173,31 @@ class ModelEnvPushing:
 
         self.goal_pos_workframe = self.traj_pos_workframe[self.targ_traj_list_id]
         self.goal_rpy_workframe = self.traj_rpy_workframe[self.targ_traj_list_id]
-        self.goal_orn_workframe = self.traj_orn_workframe[self.targ_traj_list_id]
+        if self.task == "goal_pos" or "john_task":
+            self.goal_orn_workframe = model_util.to_tensor(copy.deepcopy(self.env.goal_orn_workframe)).to(torch.float32).to(self.device)
+        else:
+            self.goal_orn_workframe = self.traj_orn_workframe[self.targ_traj_list_id]
 
         # Create the batches needed to evaluate actions
         self.targ_traj_list_id_batch = torch.tile(self.targ_traj_list_id, (batch_size,))
         self.goal_pos_workframe_batch = torch.tile(self.goal_pos_workframe, 
                                         (batch_size,) 
                                         + tuple([1] * self.goal_pos_workframe.ndim))
+
         self.goal_orn_workframe_batch = torch.tile(self.goal_orn_workframe, 
                                         (batch_size,) 
                                         + tuple([1] * self.goal_orn_workframe.ndim))
         
-    def outside_tcp_lims(self, tcp_pos_workframe, cur_obj_pos_workframe):
+    def outside_tcp_lims(self, cur_obj_pos_workframe):
         '''
         Function to check if either object or tcp postion is outside of the 
         TCP limit
         '''
         # xyz_tcp_dist_to_obj = torch.linalg.norm(tcp_pos_workframe - cur_obj_pos_workframe)
-        return ((tcp_pos_workframe[:, 0] < self.TCP_lims[0,0]) | 
-            (tcp_pos_workframe[:, 0] > self.TCP_lims[0,1]) | 
-            (tcp_pos_workframe[:, 1] < self.TCP_lims[1,0]) | 
-            (tcp_pos_workframe[:, 1] > self.TCP_lims[1,1]) | 
-            (cur_obj_pos_workframe[:, 0] < self.TCP_lims[0,0]) | 
-            (cur_obj_pos_workframe[:, 0] > self.TCP_lims[0,1]) | 
-            (cur_obj_pos_workframe[:, 1] < self.TCP_lims[1,0]) | 
-            (cur_obj_pos_workframe[:, 1] > self.TCP_lims[1,1]))
+        return ((cur_obj_pos_workframe[:, 0] < self.TCP_lims[0,0]) | 
+                (cur_obj_pos_workframe[:, 0] > self.TCP_lims[0,1]) | 
+                (cur_obj_pos_workframe[:, 1] < self.TCP_lims[1,0]) | 
+                (cur_obj_pos_workframe[:, 1] > self.TCP_lims[1,1]))
             # (xyz_tcp_dist_to_obj > self.env.obj_width / 2))           # TODO: exiting episode when roughly lose contact
 
     def termination(
@@ -229,13 +230,24 @@ class ModelEnvPushing:
             # Calculate distance between goal and current positon
             obj_goal_pos_dist = torch.linalg.norm(cur_obj_pos_workframe - self.goal_pos_workframe_batch, axis=1)
 
-        elif self.observation_mode == 'tactile_pose_data':  
-            tcp_pos_to_goal_workframe = next_obs[:, 0:3]
-            # tcp_orn_to_goal_workframe = next_obs[:, 3:7]
-            cur_obj_pos_to_goal_workframe = next_obs[:, 7:10]
-            # cur_obj_orn_to_goal_workframe = next_obs[:, 10:14]
+        elif self.observation_mode == 'tactile_pose_data': 
+            if self.planar_states == True: 
+                # tcp_pos_to_goal_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                # tcp_orn_to_goal_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+                cur_obj_pos_to_goal_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                # cur_obj_orn_to_goal_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
 
-            tcp_pos_workframe = tcp_pos_to_goal_workframe[:, 0:2] + self.goal_pos_workframe_batch[:, 0:2]
+                # tcp_pos_to_goal_workframe[:, 0:2] = next_obs[:, 0:2]
+                # tcp_orn_to_goal_workframe[:, 2:4] = next_obs[:, 0:2]
+                cur_obj_pos_to_goal_workframe[:, 0:2]= next_obs[:, 2:4]
+                # cur_obj_orn_to_goal_workframe[:, 2:4] = next_obs[:, 4:6]
+            else:
+                # tcp_pos_to_goal_workframe = next_obs[:, 0:3]
+                # tcp_orn_to_goal_workframe = next_obs[:, 0:4]
+                cur_obj_pos_to_goal_workframe = next_obs[:, 4:7]
+                # cur_obj_orn_to_goal_workframe = next_obs[:, 7:11]
+
+            # tcp_pos_workframe = tcp_pos_to_goal_workframe[:, 0:2] + self.goal_pos_workframe_batch[:, 0:2]
             cur_obj_pos_workframe = cur_obj_pos_to_goal_workframe[:, 0:2] + self.goal_pos_workframe_batch[:, 0:2]
 
              # Calculate distance between goal and current positon
@@ -244,21 +256,21 @@ class ModelEnvPushing:
         elif self.observation_mode == 'tactile_pose_goal_excluded_data':
 
             if self.planar_states == True:
-                tcp_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                # tcp_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
                 # tcp_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
                 cur_obj_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
                 # cur_obj_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
 
-                tcp_pos_workframe[:, 0:2] = next_obs[:, 0:2]
-                # tcp_orn_workframe[:, 2:4] = next_obs[:, 2:4]
-                cur_obj_pos_workframe[:, 0:2]= next_obs[:, 4:6]
-                # cur_obj_orn_workframe[:, 2:4] = next_obs[:, 6:8]
+                # tcp_pos_workframe[:, 0:2] = next_obs[:, 0:2]
+                # tcp_orn_workframe[:, 2:4] = next_obs[:, 0:2]
+                cur_obj_pos_workframe[:, 0:2]= next_obs[:, 2:4]
+                # cur_obj_orn_workframe[:, 2:4] = next_obs[:, 4:6]
             else:   
 
-                tcp_pos_workframe = next_obs[:, 0:3]
-                # tcp_orn_workframe = next_obs[:, 3:7]
-                cur_obj_pos_workframe = next_obs[:, 7:10]
-                # cur_obj_orn_workframe = next_obs[:, 10:14]
+                # tcp_pos_workframe = next_obs[:, 0:3]
+                # tcp_orn_workframe = next_obs[:, 0:4]
+                cur_obj_pos_workframe = next_obs[:, 4:7]
+                # cur_obj_orn_workframe = next_obs[:, 7:11]
 
             # Calculate distance between goal and current positon
             obj_goal_pos_dist = torch.linalg.norm(cur_obj_pos_workframe - self.goal_pos_workframe_batch, axis=1)
@@ -287,7 +299,7 @@ class ModelEnvPushing:
 
         # Early termination if outside of the tcp limits
         if self.terminate_early:
-            outside_tcp_lims_idx = self.outside_tcp_lims(tcp_pos_workframe, cur_obj_pos_workframe)
+            outside_tcp_lims_idx = self.outside_tcp_lims(cur_obj_pos_workframe)
             terminated[outside_tcp_lims_idx] = True
             rewards[outside_tcp_lims_idx] += self.terminated_early_penalty        # Add a penalty for exiting the TCP limits
         
@@ -424,10 +436,22 @@ class ModelEnvPushing:
             tip_obj_orn_dist = self.cos_tcp_dist_to_obj(cur_obj_orn_to_goal_workframe, tcp_orn_to_goal_workframe)
 
         elif self.observation_mode == 'tactile_pose_data': 
-            # tcp_pos_to_goal_workframe = next_obs[:, 0:3]
-            tcp_orn_to_goal_workframe = next_obs[:, 3:7]
-            cur_obj_pos_to_goal_workframe = next_obs[:, 7:10]
-            cur_obj_orn_to_goal_workframe = next_obs[:, 10:14]
+
+            if self.planar_states == True: 
+                # tcp_pos_to_goal_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                tcp_orn_to_goal_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+                cur_obj_pos_to_goal_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                cur_obj_orn_to_goal_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+
+                # tcp_pos_to_goal_workframe[:, 0:2] = next_obs[:, 0:2]
+                tcp_orn_to_goal_workframe[:, 2:4] = next_obs[:, 0:2]
+                cur_obj_pos_to_goal_workframe[:, 0:2]= next_obs[:, 2:4]
+                cur_obj_orn_to_goal_workframe[:, 2:4] = next_obs[:, 4:6]
+            else:
+                # tcp_pos_to_goal_workframe = next_obs[:, 0:3]
+                tcp_orn_to_goal_workframe = next_obs[:, 0:4]
+                cur_obj_pos_to_goal_workframe = next_obs[:, 4:7]
+                cur_obj_orn_to_goal_workframe = next_obs[:, 7:11]
 
             obj_goal_pos_dist = self.get_pos_dist(cur_obj_pos_to_goal_workframe)
             obj_goal_orn_dist = self.get_orn_dist(cur_obj_orn_to_goal_workframe)
@@ -442,14 +466,14 @@ class ModelEnvPushing:
                 cur_obj_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
 
                 # tcp_pos_workframe[:, 0:2] = next_obs[:, 0:2]
-                tcp_orn_workframe[:, 2:4] = next_obs[:, 2:4]
-                cur_obj_pos_workframe[:, 0:2]= next_obs[:, 4:6]
-                cur_obj_orn_workframe[:, 2:4] = next_obs[:, 6:8]
+                tcp_orn_workframe[:, 2:4] = next_obs[:, 0:2]
+                cur_obj_pos_workframe[:, 0:2]= next_obs[:, 2:4]
+                cur_obj_orn_workframe[:, 2:4] = next_obs[:, 4:6]
             else:   
                 # tcp_pos_workframe = next_obs[:, 0:3]
-                tcp_orn_workframe = next_obs[:, 3:7]
-                cur_obj_pos_workframe = next_obs[:, 7:10]
-                cur_obj_orn_workframe = next_obs[:, 10:14]
+                tcp_orn_workframe = next_obs[:, 0:4]
+                cur_obj_pos_workframe = next_obs[:, 4:7]
+                cur_obj_orn_workframe = next_obs[:, 7:11]
 
             obj_goal_pos_dist = self.xyz_obj_dist_to_goal(cur_obj_pos_workframe)
             obj_goal_orn_dist = self.orn_obj_dist_to_goal(cur_obj_orn_workframe)
@@ -471,7 +495,10 @@ class ModelEnvPushing:
             obj_goal_orn_dist = self.orn_obj_dist_to_goal(cur_obj_rpy_workframe)
             tip_obj_orn_dist = self.cos_tcp_dist_to_obj(cur_obj_rpy_workframe, tcp_rpy_workframe)
 
-        reward = -(obj_goal_pos_dist + obj_goal_orn_dist + tip_obj_orn_dist)
+        if self.task == "john_task":
+            reward = -(obj_goal_orn_dist + tip_obj_orn_dist)
+        else:
+            reward = -(obj_goal_pos_dist + obj_goal_orn_dist + tip_obj_orn_dist)
         reward = reward[:, None]
 
         return reward

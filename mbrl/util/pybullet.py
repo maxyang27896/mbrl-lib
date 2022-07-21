@@ -11,21 +11,24 @@ import numpy as np
 
 # Need to import pybulletgym to register pybullet envs.
 # Ignore the flake8 error generated
-import pybulletgym  # noqa
-from pybulletgym.envs.mujoco.envs.env_bases import BaseBulletEnv as MJBaseBulletEnv
-from pybulletgym.envs.mujoco.robots.locomotors.walker_base import (
-    WalkerBase as MJWalkerBase,
-)
-from pybulletgym.envs.roboschool.envs.env_bases import BaseBulletEnv as RSBaseBulletEnv
-from pybulletgym.envs.roboschool.robots.locomotors.walker_base import (
-    WalkerBase as RSWalkerBase,
-)
+# import pybulletgym  # noqa
+# from pybulletgym.envs.mujoco.envs.env_bases import BaseBulletEnv as MJBaseBulletEnv
+# from pybulletgym.envs.mujoco.robots.locomotors.walker_base import (
+#     WalkerBase as MJWalkerBase,
+# )
+# from pybulletgym.envs.roboschool.envs.env_bases import BaseBulletEnv as RSBaseBulletEnv
+# from pybulletgym.envs.roboschool.robots.locomotors.walker_base import (
+#     WalkerBase as RSWalkerBase,
+# )
+
+from tactile_gym.rl_envs.base_tactile_env import BaseTactileEnv
+from tactile_gym.robots.arms.robot import Robot
 
 from mbrl.util.env import EnvHandler, Freeze
 
 
 def _is_pybullet_gym_env(env: gym.wrappers.TimeLimit) -> bool:
-    return isinstance(env.env, MJBaseBulletEnv) or isinstance(env.env, RSBaseBulletEnv)
+    return isinstance(env, BaseTactileEnv)
 
 
 class FreezePybullet(Freeze):
@@ -76,9 +79,9 @@ class PybulletEnvHandler(EnvHandler):
         return _is_pybullet_gym_env(env)
 
     @staticmethod
-    def make_env_from_str(env_name: str) -> gym.Env:
+    def make_env_from_str(env_name: str, **kwargs) -> gym.Env:
         if "pybulletgym___" in env_name:
-            env = gym.make(env_name.split("___")[1])
+            env = gym.make(env_name.split("___")[1], **kwargs)
         else:
             raise ValueError("Invalid environment string.")
 
@@ -96,7 +99,7 @@ class PybulletEnvHandler(EnvHandler):
             env (:class:`gym.wrappers.TimeLimit`): the environment.
         """
         if _is_pybullet_gym_env(env):
-            robot = env.env.robot
+            robot = env.robot
 
             # pybullet-gym implements 2 types of environment:
             # - Roboschool
@@ -104,10 +107,10 @@ class PybulletEnvHandler(EnvHandler):
             #
             # In each case, the env is decomposed into the robot and the surroundings
             # For now, we only support locomotion-based envs
-            if isinstance(robot, (RSWalkerBase, MJWalkerBase)):
-                return PybulletEnvHandler._get_current_state_locomotion(env)
-            else:
-                return PybulletEnvHandler._get_current_state_default(env)
+            # if isinstance(robot, Robot):
+            #     return PybulletEnvHandler._get_current_state_locomotion(env)
+            # else:
+            return PybulletEnvHandler._get_current_state_default(env)
         else:
             raise RuntimeError("Only pybulletgym environments supported.")
 
@@ -124,8 +127,7 @@ class PybulletEnvHandler(EnvHandler):
     @staticmethod
     def _get_current_state_default(env: gym.wrappers.TimeLimit) -> Tuple:
         """Returns the internal state of a manipulation / pendulum environment."""
-        env = env.env
-        filename = PybulletEnvHandler.save_state_to_file(env._p)
+        filename = PybulletEnvHandler.save_state_to_file(env._pb)
         import pickle
 
         pickle_bytes = pickle.dumps(env)
@@ -136,10 +138,8 @@ class PybulletEnvHandler(EnvHandler):
         import pickle
 
         ((filename, pickle_bytes),) = state
-        new_env = pickle.loads(pickle_bytes)
-        env.env = new_env
-        env = env.env
-        PybulletEnvHandler.load_state_from_file(env._p, filename)
+        env = pickle.loads(pickle_bytes)
+        PybulletEnvHandler.load_state_from_file(env._pb, filename)
 
     @staticmethod
     def _get_current_state_locomotion(env: gym.wrappers.TimeLimit) -> Tuple:
@@ -152,12 +152,11 @@ class PybulletEnvHandler(EnvHandler):
         Args:
             env (:class:`gym.wrappers.TimeLimit`): the environment.
         """
-        env = env.env
         robot = env.robot
-        if not isinstance(robot, (RSWalkerBase, MJWalkerBase)):
+        if not isinstance(robot, Robot):
             raise RuntimeError("Invalid robot type. Expected a locomotor robot")
 
-        filename = PybulletEnvHandler.save_state_to_file(env._p)
+        filename = PybulletEnvHandler.save_state_to_file(env._pb)
         ground_ids = env.ground_ids
         potential = env.potential
         reward = float(env.reward)
@@ -197,7 +196,7 @@ class PybulletEnvHandler(EnvHandler):
             env (:class:`gym.wrappers.TimeLimit`): the environment.
         """
         if _is_pybullet_gym_env(env):
-            robot = env.env.robot
+            robot = env.robot
 
             # pybullet-gym implements 2 types of environment:
             # - Roboschool
@@ -205,10 +204,10 @@ class PybulletEnvHandler(EnvHandler):
             #
             # In each case, the env is decomposed into the robot and the surroundings
             # For now, we only support locomotion-based envs
-            if isinstance(robot, (RSWalkerBase, MJWalkerBase)):
-                return PybulletEnvHandler._set_env_state_locomotion(state, env)
-            else:
-                return PybulletEnvHandler._set_env_state_default(state, env)
+            # if isinstance(robot, Robot):
+            #     return PybulletEnvHandler._set_env_state_locomotion(state, env)
+            # else:
+            return PybulletEnvHandler._set_env_state_default(state, env)
         else:
             raise RuntimeError("Only pybulletgym environments supported.")
 
@@ -231,11 +230,10 @@ class PybulletEnvHandler(EnvHandler):
                 robot_data,
             ) = state
 
-            env = env.env
             env.ground_ids = ground_ids
             env.potential = potential
             env.reward = reward
-            PybulletEnvHandler.load_state_from_file(env._p, filename)
+            PybulletEnvHandler.load_state_from_file(env._pb, filename)
             for k, v in robot_data.items():
                 setattr(env.robot, k, v)
         else:
