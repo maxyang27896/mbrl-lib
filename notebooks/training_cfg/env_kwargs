@@ -1,0 +1,19 @@
+show_gui: false
+show_tactile: false
+max_steps: 1000
+image_size:
+- 128
+- 128
+env_modes:
+  movement_mode: TyRz
+  control_mode: TCP_position_control
+  rand_init_orn: false
+  rand_obj_mass: false
+  traj_type: point
+  observation_mode: tactile_pose_goal_excluded_data
+  reward_mode: dense
+  terminate_early: true
+  use_contact: true
+  task: goal_pos
+  additional_reward_settings: tip_not_normal
+  planar_states: true

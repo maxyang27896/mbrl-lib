@@ -139,6 +139,8 @@ class PybulletEnvHandler(EnvHandler):
 
         ((filename, pickle_bytes),) = state
         env = pickle.loads(pickle_bytes)
+        env.connect_pybullet()
+        env.reset()
         PybulletEnvHandler.load_state_from_file(env._pb, filename)
 
     @staticmethod
