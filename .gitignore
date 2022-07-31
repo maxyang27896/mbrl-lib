@@ -6,6 +6,8 @@ exp/
 .mypy_cache
 notebooks/.ipynb_checkpoints
 notebooks/saved_model
+notebooks/training_cfg
+notebooks/training_model
 _build
 __pycache__
 

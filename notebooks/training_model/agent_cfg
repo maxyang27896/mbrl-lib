@@ -1,5 +1,5 @@
 _target_: mbrl.planning.TrajectoryOptimizerAgent
-planning_horizon: 30
+planning_horizon: 40
 replan_freq: 1
 verbose: false
 action_lb:
