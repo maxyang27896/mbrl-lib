@@ -230,7 +230,7 @@ class EnvHandler(ABC):
 
     def rollout_env(
         self,
-        env: gym.wrappers.TimeLimit,
+        env_dict,
         initial_obs: np.ndarray,
         lookahead: int,
         agent: Optional[mbrl.planning.Agent] = None,
@@ -258,7 +258,8 @@ class EnvHandler(ABC):
         actions = []
         real_obses = []
         rewards = []
-        with self.freeze(cast(gym.wrappers.TimeLimit, env)):  # type: ignore
+        env = env_dict["env"]
+        with self.freeze(env_dict):  # type: ignore
             current_obs = initial_obs.copy()
             real_obses.append(current_obs)
             if plan is not None:

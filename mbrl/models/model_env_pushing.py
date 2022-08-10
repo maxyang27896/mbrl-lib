@@ -136,6 +136,7 @@ class ModelEnvPushing:
                 deterministic=not sample,
                 rng=self._rng,
             )
+            # self.update_goal_orn(next_observs)
             rewards = (
                 pred_rewards
                 if self.reward_fn is None
@@ -202,7 +203,23 @@ class ModelEnvPushing:
                 (cur_obj_pos_workframe[:, 1] > self.TCP_lims[1, 1]) |
                 (tcp_to_obj_orn > self.max_tcp_to_obj_orn))
             # (xyz_tcp_dist_to_obj > self.env.obj_width / 2))           # TODO: exiting episode when roughly lose contact
+    
+    def update_goal_orn(
+        self,
+        next_obs: torch.Tensor
+    ):
 
+        if self.observation_mode == 'tactile_pose_goal_excluded_data':
+            if self.planar_states == True:
+                goal_rpy_workframe_batch = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                goal_rpy_workframe_batch[:, 2] = torch.atan2(-next_obs[:, 5] + self.goal_pos_workframe_batch[:, 1], 
+                                                            -next_obs[:, 4] + self.goal_pos_workframe_batch[:, 0])
+
+                self.goal_orn_workframe_batch = euler_to_quaternion(goal_rpy_workframe_batch)
+
+        else:
+            NotImplemented
+        
     def termination(
         self, 
         act: torch.Tensor, 

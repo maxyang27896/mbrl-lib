@@ -53,13 +53,13 @@ class FreezePybullet(Freeze):
         env (:class:`gym.wrappers.TimeLimit`): the environment to freeze.
     """
 
-    def __init__(self, env: gym.wrappers.TimeLimit):
-        self._env = env
+    def __init__(self, env_dict):
+        self._env = env_dict
         self._init_state: np.ndarray = None
         self._elapsed_steps = 0
         self._step_count = 0
 
-        if not _is_pybullet_gym_env(env):
+        if not _is_pybullet_gym_env(env_dict["env"]):
             raise RuntimeError("Tried to freeze an unsupported environment.")
 
     def __enter__(self):
@@ -88,7 +88,7 @@ class PybulletEnvHandler(EnvHandler):
         return env
 
     @staticmethod
-    def get_current_state(env: gym.wrappers.TimeLimit) -> Tuple:
+    def get_current_state(env_dict) -> Tuple:
         """Returns the internal state of the environment.
 
         Returns a tuple with information that can be passed to :func:set_env_state` to manually
@@ -98,6 +98,7 @@ class PybulletEnvHandler(EnvHandler):
         Args:
             env (:class:`gym.wrappers.TimeLimit`): the environment.
         """
+        env = env_dict["env"]
         if _is_pybullet_gym_env(env):
             robot = env.robot
 
@@ -130,18 +131,43 @@ class PybulletEnvHandler(EnvHandler):
         filename = PybulletEnvHandler.save_state_to_file(env._pb)
         import pickle
 
+        _env_step_counter = env._env_step_counter
+        contact_obs_after_action = env.contact_obs_after_action
+        lost_contact_count = env.lost_contact_count
+        last_contact_pos = env.last_contact_pos
+        reset_counter = env.reset_counter
+        
+    
         pickle_bytes = pickle.dumps(env)
-        return ((filename, pickle_bytes),)
+        return (
+            (filename, pickle_bytes),
+            _env_step_counter,
+            contact_obs_after_action,
+            lost_contact_count,
+            last_contact_pos,
+            reset_counter
+        )
 
     @staticmethod
-    def _set_env_state_default(state: Tuple, env: gym.wrappers.TimeLimit) -> None:
+    def _set_env_state_default(state: Tuple, env_dict) -> None:
         import pickle
 
-        ((filename, pickle_bytes),) = state
-        env = pickle.loads(pickle_bytes)
-        env.connect_pybullet()
-        env.reset()
-        PybulletEnvHandler.load_state_from_file(env._pb, filename)
+        (
+            (filename, pickle_bytes),
+            _env_step_counter,
+            contact_obs_after_action,
+            lost_contact_count,
+            last_contact_pos,
+            reset_counter
+        ) = state
+        new_env = env_dict["env"]
+        new_env._env_step_counter = _env_step_counter
+        new_env.contact_obs_after_action = contact_obs_after_action
+        new_env.lost_contact_count = lost_contact_count
+        new_env.last_contact_pos = last_contact_pos
+        new_env.reset_counter = reset_counter
+        env_dict["env"] = new_env
+        PybulletEnvHandler.load_state_from_file(env_dict["env"] ._pb, filename)
 
     @staticmethod
     def _get_current_state_locomotion(env: gym.wrappers.TimeLimit) -> Tuple:
@@ -188,7 +214,7 @@ class PybulletEnvHandler(EnvHandler):
         )
 
     @staticmethod
-    def set_env_state(state: Tuple, env: gym.wrappers.TimeLimit) -> None:
+    def set_env_state(state: Tuple, env_dict) -> None:
         """Sets the state of the environment.
 
         Assumes ``state`` was generated using :func:`get_current_state`.
@@ -197,6 +223,7 @@ class PybulletEnvHandler(EnvHandler):
             state (tuple): see :func:`get_current_state` for a description.
             env (:class:`gym.wrappers.TimeLimit`): the environment.
         """
+        env = env_dict["env"]
         if _is_pybullet_gym_env(env):
             robot = env.robot
 
@@ -209,7 +236,7 @@ class PybulletEnvHandler(EnvHandler):
             # if isinstance(robot, Robot):
             #     return PybulletEnvHandler._set_env_state_locomotion(state, env)
             # else:
-            return PybulletEnvHandler._set_env_state_default(state, env)
+            return  PybulletEnvHandler._set_env_state_default(state, env_dict)
         else:
             raise RuntimeError("Only pybulletgym environments supported.")
 
