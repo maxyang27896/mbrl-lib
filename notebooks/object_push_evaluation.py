@@ -21,9 +21,11 @@ import mbrl.util as util
 
 import tactile_gym.rl_envs
 from tactile_gym.sb3_helpers.params import import_parameters
+from mbrl.util.plot_and_save_push_data import plot_and_save_push_plots
 
 from pyvirtualdisplay import Display
-from object_push_training import get_states_from_obs
+from tactile_gym.sb3_helpers.params import import_parameters
+from tactile_gym.rl_envs.nonprehensile_manipulation.object_push.object_push_env import get_states_from_obs
 
 _display = Display(visible=False, size=(1400, 900))
 _ = _display.start()
@@ -106,7 +108,7 @@ def evaluate_and_plot():
         
     dynamics_model = common_util.create_one_dim_tr_model(cfg, obs_shape, act_shape, work_dir)
     model_env = models.ModelEnvPushing(env, dynamics_model, termination_fn=None, reward_fn=None, generator=generator)
-
+    
     # Create agent 
     agent = planning.create_trajectory_optim_agent_for_model(
         model_env,
@@ -115,7 +117,7 @@ def evaluate_and_plot():
     )
 
     # Main PETS loop
-    num_test_trials = 10
+    num_test_trials = 12
     all_rewards = []
     evaluation_result = []
     goal_reached = []
@@ -224,62 +226,10 @@ def evaluate_and_plot():
     # Save data 
     evaluation_result = np.array(evaluation_result)
     data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
-    df = pd.DataFrame(evaluation_result, columns = data_columns)
-    pd.DataFrame(evaluation_result).to_csv(os.path.join(work_dir, "evaluation_results.csv"))
 
     # plot evaluation results
     evaluation_result_directory = os.path.join(work_dir, "evaluation_result")
-    if not os.path.exists(evaluation_result_directory):
-        os.mkdir(evaluation_result_directory)
-    else:
-        for filename in os.listdir(evaluation_result_directory):
-            file_path = os.path.join(evaluation_result_directory, filename)
-            try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-            except Exception as e:
-                print('Failed to delete %s. Reason: %s' % (file_path, e))
-
-    def plot_and_save_push_plots(df, trials, directory):
-        loss_contact = False
-        for trial in range(trials):
-            fig_xy, ax = plt.subplots(figsize=(12, 6))
-            ax.plot(df.query("trial==@trial")["tcp_x"], df.query("trial==@trial")["tcp_y"], "bs", label='tcp psosition')
-            ax.plot(df.query("trial==@trial").query("contact==@loss_contact")["tcp_x"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_y"], "g+", markersize=20)
-            ax.plot(df.query("trial==@trial")["contact_x"], df.query("trial==@trial")["contact_y"], "rs", label='contact psosition')
-            ax.plot(df.query("trial==@trial").query("contact==@loss_contact")["contact_x"], df.query("trial==@trial").query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
-            ax.plot(df.query("trial==@trial")["goal_x"].iloc[0], df.query("trial==@trial")["goal_y"].iloc[0], "x", markersize=20, markeredgecolor="black", label="goal position")
-            ax.set_xlabel("x workframe")
-            ax.set_ylabel("y workframe")
-            ax.set_xlim([env.robot.arm.TCP_lims[0, 0], env.robot.arm.TCP_lims[0, 1]])
-            ax.set_ylim([env.robot.arm.TCP_lims[1, 0], env.robot.arm.TCP_lims[1, 1]])
-            ax.legend()
-            fig_xy.savefig(os.path.join(directory, "workframe_plot_trial_{}.png".format(trial)))
-            plt.close(fig_xy)
-
-            fig_time_xy, axs = plt.subplots(1, 2, figsize=(14, 3.75), gridspec_kw={"width_ratios": [1, 1]})
-            axs[0].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["tcp_x"], "bs", label='tcp ')
-            axs[0].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_x"], "g+", markersize=20)
-            axs[0].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["contact_x"], "rs", label='contact')
-            axs[0].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["contact_x"], "gx", markersize=20)
-            axs[0].set_xlabel("Time steps (s)")
-            axs[0].set_ylabel("x axis workframe")
-            axs[0].set_ylim([env.robot.arm.TCP_lims[0, 0], env.robot.arm.TCP_lims[0, 1]])
-            axs[0].legend()
-            axs[1].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["tcp_y"], "bs", label='tcp')
-            axs[1].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_y"], "g+", markersize=20)
-            axs[1].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["contact_y"], "rs", label='contact')
-            axs[1].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
-            axs[1].set_xlabel("Time steps (s)")
-            axs[1].set_ylabel("y axis workframe")
-            axs[1].set_ylim([env.robot.arm.TCP_lims[1, 0], env.robot.arm.TCP_lims[1, 1]])
-            axs[1].legend()
-            fig_time_xy.savefig(os.path.join(directory, "time_plot_trial_{}.png".format(trial)))
-            plt.close(fig_time_xy)
-
-    plot_and_save_push_plots(df, num_test_trials, evaluation_result_directory)
+    plot_and_save_push_plots(env, evaluation_result, data_columns, num_test_trials, evaluation_result_directory, "evaluation")
 
     # Plot evaluation results
     fig, ax = plt.subplots(figsize=(12, 6))

@@ -18,53 +18,15 @@ import mbrl.models as models
 import mbrl.planning as planning
 import mbrl.util.common as common_util
 import mbrl.util as util
+from mbrl.util.plot_and_save_push_data import plot_and_save_push_plots
 
 import tactile_gym.rl_envs
 from tactile_gym.sb3_helpers.params import import_parameters
+from tactile_gym.rl_envs.nonprehensile_manipulation.object_push.object_push_env import get_states_from_obs
 
 from pyvirtualdisplay import Display
 _display = Display(visible=False, size=(1400, 900))
 _ = _display.start()
-
-def get_states_from_obs(env, obs):
-    if "goal_excluded" in env.observation_mode:
-        if env.planar_states == True:
-            # tcp_pos_workframe = np.zeros(3)
-            # tcp_orn_workframe = np.zeros(4)
-            cur_obj_pos_workframe = np.zeros(3)
-            # cur_obj_orn_workframe = np.zeros(4)
-
-            # tcp_pos_workframe[0:2] = obs[0:2]
-            # tcp_orn_workframe[2:4] = obs[2:4]
-            cur_obj_pos_workframe[0:2]= obs[4:6]
-            # cur_obj_orn_workframe[:, 2:4] = obs[6:8]
-        else:   
-            # tcp_pos_workframe = obs[0:3]
-            # tcp_orn_workframe = obs[0:4]
-            cur_obj_pos_workframe = obs[4:7]
-            # cur_obj_orn_workframe = obs[7:11]
-
-    else:
-        if env.planar_states == True: 
-            # tcp_pos_to_goal_workframe = np.zeros(3)
-            # tcp_orn_to_goal_workframe = np.zeros(4)
-            cur_obj_pos_to_goal_workframe = np.zeros(3)
-            # cur_obj_orn_to_goal_workframe = np.zeros(4)
-
-            # tcp_pos_to_goal_workframe[0:2] = obs[0:2]
-            # tcp_orn_to_goal_workframe[2:4] = obs[0:2]
-            cur_obj_pos_to_goal_workframe[0:2]= obs[2:4]
-            # cur_obj_orn_to_goal_workframe[2:4] = obs[4:6]
-        else:
-            # tcp_pos_to_goal_workframe = obs[0:3]
-            # tcp_orn_to_goal_workframe = obs[0:4]
-            cur_obj_pos_to_goal_workframe = obs[4:7]
-            # cur_obj_orn_to_goal_workframe = obs[7:11]
-
-        # tcp_pos_workframe = obs[0:3] + env.goal_pos_workframe
-        cur_obj_pos_workframe = cur_obj_pos_to_goal_workframe + env.goal_pos_workframe
-
-    return cur_obj_pos_workframe
 
 def train_and_plot():
 
@@ -105,7 +67,7 @@ def train_and_plot():
     config_file = 'cfg_dict'
     config_dir = os.path.join(os.getcwd(), "training_cfg", config_file)
     cfg = omegaconf.OmegaConf.load(config_dir)
-    num_trials = 80
+    num_trials = 30
     trial_length= cfg.overrides.trial_length
     ensemble_size = cfg.dynamics_model.ensemble_size
     cfg.overrides.num_steps = num_trials * cfg.overrides.trial_length
@@ -289,73 +251,20 @@ def train_and_plot():
 
         print("Trial {}, total steps {}, rewards {}, goal reached {}, time elapsed {}".format(trial+1, steps_trial, all_rewards[-1], env.single_goal_reached, trial_time))
 
-
-    # Plot results
+    # Plot training curve 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(total_steps[1:], all_rewards[1:], 'bs-', total_steps[1:], goal_reached[1:], 'rs')
     ax.set_xlabel("Samples")
     ax.set_ylabel("Trial reward")
     fig.savefig(os.path.join(work_dir, "output.png"))
 
-    def plot_and_save_push_plots(df, trials, directory):
-        loss_contact = False
-        for trial in range(trials):
-            fig_xy, ax = plt.subplots(figsize=(12, 6))
-            ax.plot(df.query("trial==@trial")["tcp_x"], df.query("trial==@trial")["tcp_y"], "bs", label='tcp psosition')
-            ax.plot(df.query("trial==@trial").query("contact==@loss_contact")["tcp_x"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_y"], "g+", markersize=20)
-            ax.plot(df.query("trial==@trial")["contact_x"], df.query("trial==@trial")["contact_y"], "rs", label='contact psosition')
-            ax.plot(df.query("trial==@trial").query("contact==@loss_contact")["contact_x"], df.query("trial==@trial").query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
-            ax.plot(df.query("trial==@trial")["goal_x"].iloc[0], df.query("trial==@trial")["goal_y"].iloc[0], "x", markersize=20, markeredgecolor="black", label="goal position")
-            ax.set_xlabel("x workframe")
-            ax.set_ylabel("y workframe")
-            ax.set_xlim([env.robot.arm.TCP_lims[0, 0], env.robot.arm.TCP_lims[0, 1]])
-            ax.set_ylim([env.robot.arm.TCP_lims[1, 0], env.robot.arm.TCP_lims[1, 1]])
-            ax.legend()
-            fig_xy.savefig(os.path.join(directory, "workframe_plot_trial_{}.png".format(trial)))
-            plt.close(fig_xy)
-
-            fig_time_xy, axs = plt.subplots(1, 2, figsize=(14, 3.75), gridspec_kw={"width_ratios": [1, 1]})
-            axs[0].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["tcp_x"], "bs", label='tcp ')
-            axs[0].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_x"], "g+", markersize=20)
-            axs[0].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["contact_x"], "rs", label='contact')
-            axs[0].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["contact_x"], "gx", markersize=20)
-            axs[0].set_xlabel("Time steps (s)")
-            axs[0].set_ylabel("x axis workframe")
-            axs[0].set_ylim([env.robot.arm.TCP_lims[0, 0], env.robot.arm.TCP_lims[0, 1]])
-            axs[0].legend()
-            axs[1].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["tcp_y"], "bs", label='tcp')
-            axs[1].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_y"], "g+", markersize=20)
-            axs[1].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["contact_y"], "rs", label='contact')
-            axs[1].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
-            axs[1].set_xlabel("Time steps (s)")
-            axs[1].set_ylabel("y axis workframe")
-            axs[1].set_ylim([env.robot.arm.TCP_lims[1, 0], env.robot.arm.TCP_lims[1, 1]])
-            axs[1].legend()
-            fig_time_xy.savefig(os.path.join(directory, "time_plot_trial_{}.png".format(trial)))
-            plt.close(fig_time_xy)
-
     # Save data 
     training_result = np.array(training_result)
     data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
-    df_training = pd.DataFrame(training_result, columns = data_columns)
-    pd.DataFrame(training_result).to_csv(os.path.join(work_dir, "training_results.csv"))
 
     # Plot the training results
     training_result_directory = os.path.join(work_dir, "training_result")
-    if not os.path.exists(training_result_directory):
-        os.mkdir(training_result_directory)
-    else:
-        for filename in os.listdir(training_result_directory):
-            file_path = os.path.join(training_result_directory, filename)
-            try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-            except Exception as e:
-                print('Failed to delete %s. Reason: %s' % (file_path, e))
-
-    plot_and_save_push_plots(df_training, num_trials, training_result_directory)
+    plot_and_save_push_plots(env, training_result, data_columns, num_trials, training_result_directory, "training")
 
 if __name__ == "__main__":
     train_and_plot()

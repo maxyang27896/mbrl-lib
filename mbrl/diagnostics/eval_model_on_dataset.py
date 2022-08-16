@@ -4,6 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 import argparse
 import pathlib
+import os
+import omegaconf
 from typing import List
 
 import matplotlib as mpl
@@ -12,7 +14,9 @@ import numpy as np
 
 import mbrl.util
 import mbrl.util.common
+import gym
 
+import tactile_gym.rl_envs
 
 class DatasetEvaluator:
     def __init__(self, model_dir: str, dataset_dir: str, output_dir: str):
@@ -20,11 +24,15 @@ class DatasetEvaluator:
         self.output_path = pathlib.Path(output_dir)
         pathlib.Path.mkdir(self.output_path, parents=True, exist_ok=True)
 
-        self.cfg = mbrl.util.common.load_hydra_cfg(self.model_path)
-        self.handler = mbrl.util.create_handler(self.cfg)
+        env_name = 'object_push-v0'
+        env_kwargs_file = 'env_kwargs'
+        env_kwargs_dir = os.path.join(work_dir, env_kwargs_file)
+        env_kwargs = omegaconf.OmegaConf.load(env_kwargs_dir)
+        self.env = gym.make(env_name, **env_kwargs)
 
-        self.env, term_fn, reward_fn = self.handler.make_env(self.cfg)
-        self.reward_fn = reward_fn
+        config_file = 'cfg_dict'
+        config_dir = os.path.join(work_dir, config_file)
+        self.cfg = omegaconf.OmegaConf.load(config_dir)
 
         self.dynamics_model = mbrl.util.common.create_one_dim_tr_model(
             self.cfg,
@@ -37,7 +45,7 @@ class DatasetEvaluator:
             self.cfg,
             self.env.observation_space.shape,
             self.env.action_space.shape,
-            load_dir=dataset_dir,
+            load_dir=self.model_path,
         )
 
     def plot_dataset_results(self, dataset: mbrl.util.TransitionIterator):
@@ -109,15 +117,11 @@ class DatasetEvaluator:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_dir", type=str, default=None)
-    parser.add_argument("--dataset_dir", type=str, default=None)
-    parser.add_argument("--results_dir", type=str, default=None)
-    args = parser.parse_args()
 
-    if not args.dataset_dir:
-        args.dataset_dir = args.model_dir
-    evaluator = DatasetEvaluator(args.model_dir, args.dataset_dir, args.results_dir)
+    work_dir = r'/home/qt21590/Documents/Projects/tactile_gym_mbrl/training_model/random_goal_update_orn_john_guide_off'
+    result_dir = os.path.join(os.getcwd(), 'model_accuracy_output')
+
+    evaluator = DatasetEvaluator(work_dir, work_dir, result_dir)
 
     mpl.rcParams["figure.facecolor"] = "white"
     mpl.rcParams["font.size"] = 14
