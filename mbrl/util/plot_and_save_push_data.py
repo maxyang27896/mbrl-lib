@@ -6,20 +6,6 @@ import os, sys, shutil
 
 def plot_and_save_push_plots(env, data, data_columns, trials, directory, result_type):
 
-    # plot and save results
-    if not os.path.exists(directory):
-        os.mkdir(directory)
-    else:
-        for filename in os.listdir(directory):
-            file_path = os.path.join(directory, filename)
-            try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-            except Exception as e:
-                print('Failed to delete %s. Reason: %s' % (file_path, e))
-
     # create dataframe
     df = pd.DataFrame(data, columns = data_columns)
     pd.DataFrame(data).to_csv(os.path.join(directory, "{}_result.csv".format(result_type)))
@@ -32,6 +18,20 @@ def plot_and_save_push_plots(env, data, data_columns, trials, directory, result_
         ax.plot(df.query("trial==@trial")["contact_x"], df.query("trial==@trial")["contact_y"], "rs", label='contact psosition')
         ax.plot(df.query("trial==@trial").query("contact==@loss_contact")["contact_x"], df.query("trial==@trial").query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
         ax.plot(df.query("trial==@trial")["goal_x"].iloc[0], df.query("trial==@trial")["goal_y"].iloc[0], "x", markersize=20, markeredgecolor="black", label="goal position")
+
+        # Plot orn arrows
+        for i, rows in df.query("trial==@trial").iterrows():
+            if i % 10 == 0:
+                tcp_x, tcp_y, tcp_Rz = rows["tcp_x"], rows["tcp_y"], rows["tcp_Rz"]
+                tcp_dx, tcp_dy = 0.05 * np.cos(tcp_Rz), 0.05 * np.sin(tcp_Rz)
+                tcp_x, tcp_y = tcp_x + tcp_dx*0.2, tcp_y + tcp_dy*0.2
+                plt.arrow(tcp_x, tcp_y, tcp_dx, tcp_dy, color='b')
+                obj_x, obj_y, obj_Rz= rows["contact_x"], rows["contact_y"], rows["contact_Rz"]
+                obj_dx, obj_dy = 0.05 * np.cos(obj_Rz), 0.05 * np.sin(obj_Rz)
+                obj_x, obj_y = obj_x + obj_dx*0.2, obj_y + obj_dy*0.2
+                plt.arrow(obj_x, obj_y, obj_dx, obj_dy, color='r')
+        
+        
         ax.set_xlabel("x workframe")
         ax.set_ylabel("y workframe")
         ax.set_xlim([env.robot.arm.TCP_lims[0, 0], env.robot.arm.TCP_lims[0, 1]])
@@ -59,3 +59,64 @@ def plot_and_save_push_plots(env, data, data_columns, trials, directory, result_
         axs[1].legend()
         fig_time_xy.savefig(os.path.join(directory, "time_plot_trial_{}.png".format(trial)))
         plt.close(fig_time_xy)
+
+
+def plot_and_save_training(env, data, trial, data_columns, directory):
+
+    # plot and save results
+    if not os.path.exists(directory):
+        os.mkdir(directory)
+        df = pd.DataFrame(data, columns = data_columns)
+        pd.DataFrame(data).to_csv(os.path.join(directory, "{}_result.csv".format("training")))
+    else:
+        df = pd.DataFrame(data, columns = data_columns)
+        pd.DataFrame(data).to_csv(os.path.join(directory, "{}_result.csv".format("training")), mode='a', header=False)
+
+    loss_contact = False
+    fig_xy, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(df["tcp_x"], df["tcp_y"], "bs", label='tcp psosition')
+    ax.plot(df.query("contact==@loss_contact")["tcp_x"], df.query("contact==@loss_contact")["tcp_y"], "g+", markersize=20)
+    ax.plot(df["contact_x"], df["contact_y"], "rs", label='contact psosition')
+    ax.plot(df.query("contact==@loss_contact")["contact_x"], df.query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
+    ax.plot(df["goal_x"].iloc[0], df["goal_y"].iloc[0], "x", markersize=20, markeredgecolor="black", label="goal position")
+    
+    # Plot orn arrows
+    for i, rows in df.iterrows():
+        if i % 10 == 0:
+            tcp_x, tcp_y, tcp_Rz = rows["tcp_x"], rows["tcp_y"], rows["tcp_Rz"]
+            tcp_dx, tcp_dy = 0.05 * np.cos(tcp_Rz), 0.05 * np.sin(tcp_Rz)
+            tcp_x, tcp_y = tcp_x + tcp_dx*0.2, tcp_y + tcp_dy*0.2
+            plt.arrow(tcp_x, tcp_y, tcp_dx, tcp_dy, color='b')
+            obj_x, obj_y, obj_Rz= rows["contact_x"], rows["contact_y"], rows["contact_Rz"]
+            obj_dx, obj_dy = 0.05 * np.cos(obj_Rz), 0.05 * np.sin(obj_Rz)
+            obj_x, obj_y = obj_x + obj_dx*0.2, obj_y + obj_dy*0.2
+            plt.arrow(obj_x, obj_y, obj_dx, obj_dy, color='r')
+    
+    
+    ax.set_xlabel("x workframe")
+    ax.set_ylabel("y workframe")
+    ax.set_xlim([env.robot.arm.TCP_lims[0, 0], env.robot.arm.TCP_lims[0, 1]])
+    ax.set_ylim([env.robot.arm.TCP_lims[1, 0], env.robot.arm.TCP_lims[1, 1]])
+    ax.legend()
+    fig_xy.savefig(os.path.join(directory, "workframe_plot_trial_{}.png".format(trial)))
+    plt.close(fig_xy)
+
+    fig_time_xy, axs = plt.subplots(1, 2, figsize=(14, 3.75), gridspec_kw={"width_ratios": [1, 1]})
+    axs[0].plot(df["time_steps"], df["tcp_x"], "bs", label='tcp ')
+    axs[0].plot(df.query("contact==@loss_contact")["time_steps"], df.query("contact==@loss_contact")["tcp_x"], "g+", markersize=20)
+    axs[0].plot(df["time_steps"], df["contact_x"], "rs", label='contact')
+    axs[0].plot(df.query("contact==@loss_contact")["time_steps"], df.query("contact==@loss_contact")["contact_x"], "gx", markersize=20)
+    axs[0].set_xlabel("Time steps (s)")
+    axs[0].set_ylabel("x axis workframe")
+    axs[0].set_ylim([env.robot.arm.TCP_lims[0, 0], env.robot.arm.TCP_lims[0, 1]])
+    axs[0].legend()
+    axs[1].plot(df["time_steps"], df["tcp_y"], "bs", label='tcp')
+    axs[1].plot(df.query("contact==@loss_contact")["time_steps"], df.query("contact==@loss_contact")["tcp_y"], "g+", markersize=20)
+    axs[1].plot(df["time_steps"], df["contact_y"], "rs", label='contact')
+    axs[1].plot(df.query("contact==@loss_contact")["time_steps"], df.query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
+    axs[1].set_xlabel("Time steps (s)")
+    axs[1].set_ylabel("y axis workframe")
+    axs[1].set_ylim([env.robot.arm.TCP_lims[1, 0], env.robot.arm.TCP_lims[1, 1]])
+    axs[1].legend()
+    fig_time_xy.savefig(os.path.join(directory, "time_plot_trial_{}.png".format(trial)))
+    plt.close(fig_time_xy)

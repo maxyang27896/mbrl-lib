@@ -1,4 +1,5 @@
 from IPython import display
+import argparse
 import cv2
 import gym
 import matplotlib as mpl
@@ -69,10 +70,27 @@ def make_evaluation_goals(env, num_trials):
         
         return evaluation_goals
 
-def evaluate_and_plot():
+def evaluate_and_plot(model_number, num_test_trials):
 
     model_filename = 'training_model'
+    # model_number = 50
     work_dir = os.path.join(os.getcwd(), model_filename)
+    # work_dir = r"/home/qt21590/Documents/Projects/tactile_gym_mbrl/training_model/random_goal_update_orn_john_guide_off"
+    model_dir = os.path.join(work_dir, 'model_trial_{}'.format(model_number))
+    evaluation_result_directory = os.path.join(work_dir, "evaluation_result_model_{}".format(model_number))
+
+    if not os.path.exists(evaluation_result_directory):
+        os.mkdir(evaluation_result_directory)
+    else:
+        for filename in os.listdir(evaluation_result_directory):
+            file_path = os.path.join(evaluation_result_directory, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print('Failed to delete %s. Reason: %s' % (file_path, e))
 
     # Load the environment 
     env_name = 'object_push-v0'
@@ -106,7 +124,7 @@ def evaluate_and_plot():
         agent_cfg['optimizer_cfg']['device'] = device
         map_location = torch.device(device)
         
-    dynamics_model = common_util.create_one_dim_tr_model(cfg, obs_shape, act_shape, work_dir)
+    dynamics_model = common_util.create_one_dim_tr_model(cfg, obs_shape, act_shape, model_dir)
     model_env = models.ModelEnvPushing(env, dynamics_model, termination_fn=None, reward_fn=None, generator=generator)
     
     # Create agent 
@@ -117,7 +135,7 @@ def evaluate_and_plot():
     )
 
     # Main PETS loop
-    num_test_trials = 12
+    # num_test_trials = 12
     all_rewards = []
     evaluation_result = []
     goal_reached = []
@@ -131,19 +149,21 @@ def evaluate_and_plot():
             evaluate_goals = make_evaluation_goals(env, num_test_trials)
 
     if save_vid:
-        record_every_n_frames = 1
+        record_every_n_frames = 3
         render_img = env.render(mode="rgb_array")
         render_img_size = (render_img.shape[1], render_img.shape[0])
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         out = cv2.VideoWriter(
-            os.path.join(work_dir, "evaluated_policy.mp4"),
+            os.path.join(evaluation_result_directory, "evaluated_policy.mp4"),
             fourcc,
             24.0,
             render_img_size,
         )
 
+    evaluate_time = time.time()
     for trial in range(num_test_trials):
         obs = env.reset()  
+        env.make_goal([0.18, 0.18])
         if hasattr(env, 'goal_edges'):
             if num_test_trials >= len(env.goal_edges):
                 env.make_goal(evaluate_goals[trial])
@@ -153,14 +173,18 @@ def evaluate_and_plot():
         trial_reward = 0.0
         trial_pb_steps = 0.0
         steps_trial = 0
-        
-        tcp_pos_workframe, _, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
-        cur_obj_pos_workframe = get_states_from_obs(env, obs)
+        start_trial_time = time.time()
+
+        tcp_pos_workframe, tcp_rpy_workframe, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
+        cur_obj_pos_workframe, cur_obj_orn_workframe = get_states_from_obs(env, obs)
+        cur_obj_rpy_workframe = env._pb.getEulerFromQuaternion(cur_obj_orn_workframe)
         evaluation_result.append(np.hstack([trial, 
                                         steps_trial, 
                                         trial_pb_steps,
                                         tcp_pos_workframe, 
                                         cur_obj_pos_workframe, 
+                                        tcp_rpy_workframe[2],
+                                        cur_obj_rpy_workframe[2],
                                         env.goal_pos_workframe, 
                                         trial_reward, 
                                         False,
@@ -184,13 +208,16 @@ def evaluate_and_plot():
             trial_pb_steps += info["num_of_pb_steps"]
             steps_trial += 1
             
-            tcp_pos_workframe, _, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
-            cur_obj_pos_workframe = get_states_from_obs(env, obs)
+            tcp_pos_workframe, tcp_rpy_workframe, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
+            cur_obj_pos_workframe, cur_obj_orn_workframe = get_states_from_obs(env, obs)
+            cur_obj_rpy_workframe = env._pb.getEulerFromQuaternion(cur_obj_orn_workframe)
             evaluation_result.append(np.hstack([trial,
                                             steps_trial,
                                             trial_pb_steps * env._sim_time_step,
                                             tcp_pos_workframe, 
                                             cur_obj_pos_workframe, 
+                                            tcp_rpy_workframe[2],
+                                            cur_obj_rpy_workframe[2],
                                             env.goal_pos_workframe, 
                                             trial_reward, 
                                             info["tip_in_contact"],
@@ -209,7 +236,12 @@ def evaluate_and_plot():
             if steps_trial == trial_length:
                 break
         
-        print("Terminated at step {} with reward {}, goal reached: {}".format(steps_trial, trial_reward, env.single_goal_reached))
+        print("Terminated at step {} with reward {}, goal reached: {}, time elapsed {}".format(
+            steps_trial, 
+            trial_reward, 
+            env.single_goal_reached,
+            time.time() - start_trial_time)
+            )
         all_rewards.append(trial_reward)
 
         # save goal reached data during training
@@ -221,14 +253,17 @@ def evaluate_and_plot():
     if save_vid:
         out.release()
 
-    print("The average reward over {} episodes is {}".format(num_test_trials, np.mean(all_rewards)))
+    print("The average reward over {} episodes is {}, time elapsed {}".format(
+        num_test_trials, 
+        np.mean(all_rewards),
+        time.time() - evaluate_time)   
+        )   
 
     # Save data 
     evaluation_result = np.array(evaluation_result)
-    data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
+    data_columns =  ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
 
     # plot evaluation results
-    evaluation_result_directory = os.path.join(work_dir, "evaluation_result")
     plot_and_save_push_plots(env, evaluation_result, data_columns, num_test_trials, evaluation_result_directory, "evaluation")
 
     # Plot evaluation results
@@ -236,7 +271,33 @@ def evaluate_and_plot():
     ax.plot(all_rewards, 'bs-', goal_reached, 'rs')
     ax.set_xlabel("Trial")
     ax.set_ylabel("Trial reward")
-    fig.savefig(os.path.join(work_dir, "evaluation_output.png"))
+    fig.savefig(os.path.join(evaluation_result_directory, "evaluation_output.png"))
+    plt.close(fig)
 
 if __name__ == "__main__":
-    evaluate_and_plot()
+
+    parser = argparse.ArgumentParser()
+    # parser.add_argument("--num_steps", type=int, default=200)
+    # parser.add_argument(
+    #     "--model_subdir",
+    #     type=str,
+    #     default=None,
+    #     help="Can be used to point to models generated by other diagnostics tools.",
+    # )
+    parser.add_argument(
+        "--model_num",
+        type=int,
+        default=80,
+        help="Model number to test for evaluation.",
+    )
+    parser.add_argument(
+        "--eval_trials",
+        type=int,
+        default=12,
+        help="Number of evaluation trials.",
+    )
+    args = parser.parse_args()
+    evaluate_and_plot(
+        args.model_num,
+        args.eval_trials,
+    )

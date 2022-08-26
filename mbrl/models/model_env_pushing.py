@@ -60,9 +60,11 @@ class ModelEnvPushing:
         self.reached_goal_reward = env.reached_goal_reward 
         self.traj_n_points = env.traj_n_points
         self.TCP_lims = env.robot.arm.TCP_lims
-        self.max_tcp_to_obj_orn = env.max_tcp_to_obj_orn
+        self.max_tcp_to_obj_orn = env.max_tcp_to_obj_orn #- (0/180 * torch.pi)
+        self.max_tip_to_obj_pos = np.inf #0.02
         self.task = env.task
         self.planar_states = env.planar_states
+        self.mpc_goal_orn_update = env.mpc_goal_orn_update
   
         self._current_obs: torch.Tensor = None
         self._propagation_method: Optional[str] = None
@@ -136,7 +138,10 @@ class ModelEnvPushing:
                 deterministic=not sample,
                 rng=self._rng,
             )
-            # self.update_goal_orn(next_observs)
+            # Update goal orn in mpc only if current obs outside of sensitive zone
+            if self.mpc_goal_orn_update and self.env.xyz_obj_dist_to_goal() > 0.1: 
+                self.update_goal_orn(next_observs)
+                
             rewards = (
                 pred_rewards
                 if self.reward_fn is None
@@ -201,7 +206,8 @@ class ModelEnvPushing:
                 (cur_obj_pos_workframe[:, 0] > self.TCP_lims[0, 1]) | 
                 (cur_obj_pos_workframe[:, 1] < self.TCP_lims[1, 0]) | 
                 (cur_obj_pos_workframe[:, 1] > self.TCP_lims[1, 1]) |
-                (tcp_to_obj_orn > self.max_tcp_to_obj_orn))
+                (tcp_to_obj_orn > self.max_tcp_to_obj_orn))# | 
+                #(tip_to_obj_pos > self.max_tip_to_obj_pos))
             # (xyz_tcp_dist_to_obj > self.env.obj_width / 2))           # TODO: exiting episode when roughly lose contact
     
     def update_goal_orn(
@@ -276,12 +282,12 @@ class ModelEnvPushing:
         elif self.observation_mode == 'tactile_pose_goal_excluded_data':
 
             if self.planar_states == True:
-                # tcp_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                tcp_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
                 tcp_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
                 cur_obj_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
                 cur_obj_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
 
-                # tcp_pos_workframe[:, 0:2] = next_obs[:, 0:2]
+                tcp_pos_workframe[:, 0:2] = next_obs[:, 0:2]
                 tcp_orn_workframe[:, 2:4] = next_obs[:, 2:4]
                 cur_obj_pos_workframe[:, 0:2]= next_obs[:, 4:6]
                 cur_obj_orn_workframe[:, 2:4] = next_obs[:, 6:8]
@@ -297,6 +303,9 @@ class ModelEnvPushing:
 
             # calculate tcp to object orn
             abs_tcp_to_obj_orn = self.get_orn_dist(cur_obj_orn_workframe, tcp_orn_workframe)
+
+            # Calculate tip to obj distance 
+            # tip_to_obj_pos = torch.linalg.norm(tcp_pos_workframe - cur_obj_pos_workframe, axis=1)
 
         # Default oracle observations
         else:

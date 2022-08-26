@@ -1,4 +1,5 @@
 from IPython import display
+import argparse
 import cv2
 import gym
 import matplotlib as mpl
@@ -18,7 +19,7 @@ import mbrl.models as models
 import mbrl.planning as planning
 import mbrl.util.common as common_util
 import mbrl.util as util
-from mbrl.util.plot_and_save_push_data import plot_and_save_push_plots
+from mbrl.util.plot_and_save_push_data import plot_and_save_training
 
 import tactile_gym.rl_envs
 from tactile_gym.sb3_helpers.params import import_parameters
@@ -28,7 +29,7 @@ from pyvirtualdisplay import Display
 _display = Display(visible=False, size=(1400, 900))
 _ = _display.start()
 
-def train_and_plot():
+def train_and_plot(num_trials):
 
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -67,7 +68,7 @@ def train_and_plot():
     config_file = 'cfg_dict'
     config_dir = os.path.join(os.getcwd(), "training_cfg", config_file)
     cfg = omegaconf.OmegaConf.load(config_dir)
-    num_trials = 30
+    # num_trials = 80
     trial_length= cfg.overrides.trial_length
     ensemble_size = cfg.dynamics_model.ensemble_size
     cfg.overrides.num_steps = num_trials * cfg.overrides.trial_length
@@ -128,9 +129,13 @@ def train_and_plot():
     plan_time = 0.0
     train_time = 0.0
 
+    # Save training data
+    save_model_freqency = 10
+    data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
+    training_result_directory = os.path.join(work_dir, "training_result")
     record_video = True
     record_video_frequency = 5
-
+    
     # parametes
     train_losses = [0.0]
     val_scores = [0.0]
@@ -163,13 +168,16 @@ def train_and_plot():
                 render_img_size,
             )
         
-        tcp_pos_workframe, _, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
-        cur_obj_pos_workframe = get_states_from_obs(env, obs)
+        tcp_pos_workframe, tcp_rpy_workframe, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
+        cur_obj_pos_workframe, cur_obj_orn_workframe = get_states_from_obs(env, obs)
+        cur_obj_rpy_workframe = env._pb.getEulerFromQuaternion(cur_obj_orn_workframe)
         training_result.append(np.hstack([trial, 
                                         steps_trial, 
                                         trial_pb_steps,
                                         tcp_pos_workframe, 
                                         cur_obj_pos_workframe, 
+                                        tcp_rpy_workframe[2],
+                                        cur_obj_rpy_workframe[2],
                                         env.goal_pos_workframe, 
                                         trial_reward, 
                                         False,
@@ -198,9 +206,13 @@ def train_and_plot():
                     silent=True)
                 train_time = time.time() - start_train_time
 
-                if work_dir is not None:
-                    dynamics_model.save(str(work_dir))
-                    replay_buffer.save(work_dir)
+                # save model at regular frequencies
+                if (trial+1) % save_model_freqency  == 0 and trial >= 19:
+                    model_dir = os.path.join(work_dir, 'model_trial_{}'.format(trial+1))
+                    os.makedirs(model_dir, exist_ok=True)
+                    dynamics_model.save(str(model_dir))
+
+                replay_buffer.save(work_dir)
 
             # --- Doing env step using the agent and adding to model dataset ---
             # start_plan_time = time.time()
@@ -214,13 +226,16 @@ def train_and_plot():
             steps_trial += 1
 
             # Save data for plotting training performance
-            tcp_pos_workframe, _, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
-            cur_obj_pos_workframe = get_states_from_obs(env, obs)
+            tcp_pos_workframe, tcp_rpy_workframe, _, _, _ = env.robot.arm.get_current_TCP_pos_vel_workframe()
+            cur_obj_pos_workframe, cur_obj_orn_workframe = get_states_from_obs(env, obs)
+            cur_obj_rpy_workframe = env._pb.getEulerFromQuaternion(cur_obj_orn_workframe)
             training_result.append(np.hstack([trial,
                                             steps_trial,
                                             trial_pb_steps * env._sim_time_step,
                                             tcp_pos_workframe, 
                                             cur_obj_pos_workframe, 
+                                            tcp_rpy_workframe[2],
+                                            cur_obj_rpy_workframe[2],
                                             env.goal_pos_workframe, 
                                             trial_reward, 
                                             info["tip_in_contact"],
@@ -239,6 +254,11 @@ def train_and_plot():
         total_steps.append(steps_trial + total_steps[-1])
         trial_time = time.time() - start_trial_time
 
+        # Save data to csv and plot
+        training_result = np.array(training_result)
+        plot_and_save_training(env, training_result, trial, data_columns, training_result_directory)
+        training_result = []
+
         # save goal reached data during training
         if env.single_goal_reached:
             goal_reached.append(trial_reward)
@@ -251,20 +271,31 @@ def train_and_plot():
 
         print("Trial {}, total steps {}, rewards {}, goal reached {}, time elapsed {}".format(trial+1, steps_trial, all_rewards[-1], env.single_goal_reached, trial_time))
 
-    # Plot training curve 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(total_steps[1:], all_rewards[1:], 'bs-', total_steps[1:], goal_reached[1:], 'rs')
-    ax.set_xlabel("Samples")
-    ax.set_ylabel("Trial reward")
-    fig.savefig(os.path.join(work_dir, "output.png"))
+        # Plot training curve 
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(total_steps[1:], all_rewards[1:], 'bs-', total_steps[1:], goal_reached[1:], 'rs')
+        ax.set_xlabel("Samples")
+        ax.set_ylabel("Trial reward")
+        fig.savefig(os.path.join(work_dir, "output.png"))
+        plt.close(fig)
 
-    # Save data 
-    training_result = np.array(training_result)
-    data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
+    # Save all data 
+    # training_result = np.array(training_result)
+    # data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
 
-    # Plot the training results
-    training_result_directory = os.path.join(work_dir, "training_result")
-    plot_and_save_push_plots(env, training_result, data_columns, num_trials, training_result_directory, "training")
+    # # Plot the training results
+    # training_result_directory = os.path.join(work_dir, "training_result")
+    # plot_and_save_push_plots(env, training_result, data_columns, num_trials, training_result_directory, "training")
 
 if __name__ == "__main__":
-    train_and_plot()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--num_trials",
+        type=int,
+        default=30,
+        help="Number of training trials.",
+    )
+    args = parser.parse_args()
+    train_and_plot(
+        args.num_trials
+    )
