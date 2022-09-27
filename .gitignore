@@ -8,6 +8,7 @@ notebooks/.ipynb_checkpoints
 notebooks/saved_model
 notebooks/training_cfg
 notebooks/training_model
+notebooks/training_model_1
 _build
 __pycache__
 

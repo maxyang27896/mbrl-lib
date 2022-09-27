@@ -541,7 +541,7 @@ def rollout_agent_trajectories(
                 action = agent.act(obs, **agent_kwargs)
                 next_obs, reward, done, info = env.step(action)
                 if callback:
-                    callback((obs, action, next_obs, reward, done))
+                    callback((env, obs, action, next_obs, reward, done, info))
             obs = next_obs
             total_reward += reward
             step += 1
@@ -604,5 +604,5 @@ def step_env_and_add_to_buffer(
     next_obs, reward, done, info = env.step(action)
     replay_buffer.add(obs, action, next_obs, reward, done)
     if callback:
-        callback((obs, action, next_obs, reward, done))
+        callback((env, obs, action, next_obs, reward, done, info))
     return next_obs, reward, done, info
