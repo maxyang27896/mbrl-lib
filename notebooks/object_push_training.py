@@ -1,3 +1,4 @@
+from calendar import TUESDAY
 from IPython import display
 import argparse
 import cv2
@@ -57,24 +58,27 @@ def train_and_plot(num_trials, model_filename):
     algo_name = 'ppo'
     env_name = 'object_push-v0'
     rl_params, algo_params, augmentations = import_parameters(env_name, algo_name)
-    rl_params["env_modes"][ 'observation_mode'] = 'tactile_pose_goal_excluded_data'
+    rl_params["max_ep_len"] = 2000    
+    rl_params["env_modes"][ 'observation_mode'] = 'tactile_pose_relative_data'
     rl_params["env_modes"][ 'control_mode'] = 'TCP_position_control'
+    rl_params["env_modes"]['movement_mode'] = 'TyRz'
     rl_params["env_modes"]['traj_type'] = 'point'
     rl_params["env_modes"]['task'] = "goal_pos"
-    rl_params["env_modes"]['movement_mode'] = 'TxTyRz'
-    rl_params["max_ep_len"] = 2000    
+    rl_params["env_modes"]['planar_states'] = True
     rl_params["env_modes"]['use_contact'] = True
     rl_params["env_modes"]['terminate_early']  = True
     rl_params["env_modes"]['terminate_terminate_early'] = True
+
+    rl_params["env_modes"]['additional_reward_settings'] = 'john_guide_off_normal'
     rl_params["env_modes"]['terminated_early_penalty'] =  -100
     rl_params["env_modes"]['reached_goal_reward'] = 100
-    rl_params["env_modes"]['additional_reward_settings'] = 'guide_off'
-    rl_params["env_modes"]['mpc_goal_orn_update'] = False
-    rl_params["env_modes"]['goal_orn_update_freq'] = 'every_step'
-    rl_params["env_modes"]['planar_states'] = True
-    rl_params["env_modes"]['importance_obj_goal_pos'] = 1.0
+    rl_params["env_modes"]['importance_obj_goal_pos'] = 5.0
     rl_params["env_modes"]['importance_obj_goal_orn'] = 1.0
     rl_params["env_modes"]['importance_tip_obj_orn'] = 1.0
+
+    rl_params["env_modes"]['mpc_goal_orn_update'] = False
+    rl_params["env_modes"]['goal_orn_update_freq'] = 'every_step'
+
 
     # set limits and goals
     TCP_lims = np.zeros(shape=(6, 2))
@@ -142,16 +146,20 @@ def train_and_plot(num_trials, model_filename):
             "out_size": "???",
             "deterministic": False,
             "propagation_method": "fixed_model",
+            "learn_logvar_bounds": False,
             # can also configure activation function for GaussianMLP
+            # "activation_fn_cfg": {
+            #     "_target_": "torch.nn.LeakyReLU",
+            #     "negative_slope": 0.01
+            # }
             "activation_fn_cfg": {
-                "_target_": "torch.nn.LeakyReLU",
-                "negative_slope": 0.01
+                "_target_": "torch.nn.SiLU",
             }
         },
         # options for training the dynamics model
         "algorithm": {
             "learned_rewards": False,
-            "target_is_delta": False,
+            "target_is_delta": True,
             "normalize": True,
             "target_normalize": target_normalised,
             "dataset_size": buffer_size
@@ -221,7 +229,7 @@ def train_and_plot(num_trials, model_filename):
     agent_cfg = omegaconf.OmegaConf.create({
         # this class evaluates many trajectories and picks the best one
         "_target_": "mbrl.planning.TrajectoryOptimizerAgent",
-        "planning_horizon": 40,
+        "planning_horizon": 15,
         "replan_freq": 1,
         "verbose": False,
         "action_lb": "???",
@@ -280,7 +288,7 @@ def train_and_plot(num_trials, model_filename):
 
     # Save training data
     save_model_freqency = 5
-    data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
+    data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_Rz', 'rewards', 'contact', 'dones']
     training_result_directory = os.path.join(work_dir, "training_result")
     record_video = True
     record_video_frequency = 5
@@ -320,7 +328,7 @@ def train_and_plot(num_trials, model_filename):
         (tcp_pos_workframe, 
         tcp_rpy_workframe,
         cur_obj_pos_workframe, 
-        cur_obj_rpy_workframe) = get_states_from_obs(env, obs)
+        cur_obj_rpy_workframe) = env.get_obs_workframe()
         training_result.append(np.hstack([trial, 
                                         steps_trial, 
                                         trial_pb_steps,
@@ -328,7 +336,8 @@ def train_and_plot(num_trials, model_filename):
                                         cur_obj_pos_workframe, 
                                         tcp_rpy_workframe[2],
                                         cur_obj_rpy_workframe[2],
-                                        env.goal_pos_workframe, 
+                                        env.goal_pos_workframe[0:2], 
+                                        env.goal_rpy_workframe[2],
                                         trial_reward, 
                                         False,
                                         done]))
@@ -379,7 +388,7 @@ def train_and_plot(num_trials, model_filename):
             (tcp_pos_workframe, 
             tcp_rpy_workframe,
             cur_obj_pos_workframe, 
-            cur_obj_rpy_workframe) = get_states_from_obs(env, obs)
+            cur_obj_rpy_workframe) = env.get_obs_workframe()
             training_result.append(np.hstack([trial,
                                             steps_trial,
                                             trial_pb_steps * env._sim_time_step,
@@ -387,7 +396,8 @@ def train_and_plot(num_trials, model_filename):
                                             cur_obj_pos_workframe, 
                                             tcp_rpy_workframe[2],
                                             cur_obj_rpy_workframe[2],
-                                            env.goal_pos_workframe, 
+                                            env.goal_pos_workframe[0:2], 
+                                            env.goal_rpy_workframe[2],
                                             trial_reward, 
                                             info["tip_in_contact"],
                                             done]))

@@ -181,7 +181,7 @@ class ModelEnvPushing:
 
         self.goal_pos_workframe = self.traj_pos_workframe[self.targ_traj_list_id]
         self.goal_rpy_workframe = self.traj_rpy_workframe[self.targ_traj_list_id]
-        if self.task == "goal_pos" or "john_task":
+        if self.task == "goal_pos":
             self.goal_orn_workframe = model_util.to_tensor(copy.deepcopy(self.env.goal_orn_workframe)).to(torch.float32).to(self.device)
         else:
             self.goal_orn_workframe = self.traj_orn_workframe[self.targ_traj_list_id]
@@ -195,6 +195,11 @@ class ModelEnvPushing:
         self.goal_orn_workframe_batch = torch.tile(self.goal_orn_workframe, 
                                         (batch_size,) 
                                         + tuple([1] * self.goal_orn_workframe.ndim))
+
+        self.goal_obs = model_util.to_tensor(copy.deepcopy(self.env.get_goal_obs())).to(torch.float32).to(self.device)
+        self.goal_obs_batch = torch.tile(self.goal_obs, 
+                                        (batch_size,) 
+                                        + tuple([1] * self.goal_obs.ndim))
         
     def outside_tcp_lims(self, cur_obj_pos_workframe, tcp_to_obj_orn, tip_to_obj_pos):
         '''
@@ -307,6 +312,58 @@ class ModelEnvPushing:
             # Calculate tip to obj distance 
             tip_to_obj_pos = torch.linalg.norm(tcp_pos_workframe - cur_obj_pos_workframe, axis=1)
 
+        elif self.observation_mode == 'tactile_pose_relative_data':
+
+            if self.planar_states == True:
+                tcp_obj_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                tcp_obj_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+                cur_obj_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                cur_obj_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+
+                tcp_obj_pos_workframe[:, 0:2] = next_obs[:, 0:2]
+                tcp_obj_orn_workframe[:, 2:4] = next_obs[:, 2:4]
+                cur_obj_pos_workframe[:, 0:2] = next_obs[:, 4:6]
+                cur_obj_orn_workframe[:, 2:4] = next_obs[:, 6:8]
+            else:   
+                NotImplemented
+
+            # Calculate distance between goal and current positon
+            obj_goal_pos_dist = torch.linalg.norm(next_obs[:, 4:6] - self.goal_obs_batch[:, 4:6], axis=1)
+
+            # calculate tcp to object orn
+            abs_tcp_to_obj_orn = self.get_orn_dist(next_obs[:, 2:4], self.goal_obs_batch[:, 2:4])
+
+            # Calculate tip to obj distance 
+            tip_to_obj_pos = torch.linalg.norm(next_obs[:, 0:2], axis=1)
+
+        elif self.observation_mode == 'tactile_pose_relative_forward_data':
+
+            # if self.planar_states == True:
+            #     tcp_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+            #     tcp_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+            #     obj_tcp_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+            #     obj_tcp_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+
+            #     tcp_pos_workframe[:, 0:2] = next_obs[:, 0:2]
+            #     tcp_orn_workframe[:, 2:4] = next_obs[:, 2:4]
+            #     obj_tcp_pos_workframe[:, 0:2] = next_obs[:, 4:6]
+            #     obj_tcp_orn_workframe[:, 2:4] = next_obs[:, 6:8]
+
+            # else:   
+            #     NotImplemented
+
+            # # Calculate distance between goal and current positon
+            # obj_pos_workframe = obj_tcp_pos_workframe + tcp_pos_workframe
+            # obj_goal_pos_dist = torch.linalg.norm(obj_pos_workframe - self.goal_pos_workframe_batch, axis=1)
+
+            # # calculate tcp to object orn
+            # abs_tcp_to_obj_orn = self.get_orn_norm(obj_tcp_pos_workframe[:, 2:4])
+
+            # # Calculate tip to obj distance 
+            # tip_to_obj_pos = torch.linalg.norm(next_obs[:, 0:2]  - self.goal_obs_batch[:, 0:2], axis=1)
+
+            NotImplemented
+            
         # Default oracle observations
         else:
             tcp_pos_workframe = next_obs[:, 0:3]
@@ -360,6 +417,13 @@ class ModelEnvPushing:
         """
         # calculate distance
         return torch.linalg.norm(obj_pos_data, axis=1)
+
+    def get_pos_diff(self, pos_1, pos_2):
+        """
+        Compute the L2 distance
+        """
+        dist = torch.linalg.norm(pos_1 - pos_2, axis=1)
+        return dist
 
     def orn_obj_dist_to_goal(
         self, 
@@ -522,6 +586,45 @@ class ModelEnvPushing:
             obj_goal_pos_dist = self.xyz_obj_dist_to_goal(cur_obj_pos_workframe)
             obj_goal_orn_dist = self.orn_obj_dist_to_goal(cur_obj_orn_workframe)
             tip_obj_orn_dist = self.get_orn_dist(cur_obj_orn_workframe, tcp_orn_workframe)
+
+        elif self.observation_mode == 'tactile_pose_relative_data':
+
+            if self.planar_states == True:
+
+                obj_goal_pos_dist = self.get_pos_diff(next_obs[:, 4:6], self.goal_obs_batch[:, 4:6])
+                obj_goal_orn_dist = self.get_orn_dist(next_obs[:, 6:8], self.goal_obs_batch[:, 6:8])
+                tip_obj_orn_dist = self.get_orn_dist(next_obs[:, 2:4], self.goal_obs_batch[:, 2:4])
+            
+            else:
+                NotImplemented
+
+        
+        elif self.observation_mode == 'tactile_pose_relative_forward_data':
+
+            # if self.planar_states == True:
+
+            #     tcp_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+            #     tcp_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+            #     obj_pos_to_tcp_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+            #     obj_orn_to_tcp_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+
+            #     tcp_pos_workframe[:, 0:2] = next_obs[:, 0:2]
+            #     tcp_orn_workframe[:, 0:2] = next_obs[:, 2:4]
+            #     obj_pos_to_tcp_workframe[:, 0:2] = next_obs[:, 4:6]
+            #     obj_orn_to_tcp_workframe[:, 0:2] = next_obs[:, 6:8]
+
+            # else:
+            #     NotImplemented
+            
+            # goal_pos_to_tcp_workframe = self.goal_pos_workframe_batch - tcp_pos_workframe
+            # goal_orn_to_tcp_workframe = self.
+
+            # obj_goal_pos_dist = self.get_pos_diff(obj_pos_workframe, self.goal_pos_workframe_batch)
+            # obj_goal_orn_dist = self.get_orn_dist(next_obs[:, 6:8], self.goal_obs_batch[:, 6:8])
+            # tip_obj_orn_dist = self.get_orn_norm(obj_orn_to_tcp_workframe)
+
+            NotImplemented
+
         
         else:
             # tcp_pos_workframe = next_obs[:, 0:3]

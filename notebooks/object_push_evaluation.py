@@ -75,9 +75,13 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     # model_filename = 'training_model'
     # model_number = 50
     work_dir = os.path.join(os.getcwd(), model_filename)
-    # work_dir = r"/home/qt21590/Documents/Projects/tactile_gym_mbrl/training_model/random_goal_update_orn_john_guide_off"
+    # work_dir = r"/home/qt21590/Documents/Projects/tactile_gym_mbrl/training_model/stochastic_icem_H25"
     model_dir = os.path.join(work_dir, 'model_trial_{}'.format(model_number))
     evaluation_result_directory = os.path.join(work_dir, "evaluation_result_model_{}".format(model_number))
+
+    # work_dir = r"/home/qt21590/Documents/Projects/tactile_gym_mbrl/training_model/random_goal_update_orn_john_guide_off"
+    # model_dir = work_dir
+    # evaluation_result_directory = os.path.join(work_dir, "evaluation_result")
 
     if not os.path.exists(evaluation_result_directory):
         os.mkdir(evaluation_result_directory)
@@ -97,6 +101,12 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     env_kwargs_file = 'env_kwargs'
     env_kwargs_dir = os.path.join(work_dir, env_kwargs_file)
     env_kwargs = omegaconf.OmegaConf.load(env_kwargs_dir)
+    env_kwargs["env_modes"]['eval_mode'] = True
+    env_kwargs["env_modes"]['eval_num'] = num_test_trials
+    # env_kwargs["env_modes"]['additional_reward_settings'] = 'john_guide_off_normal'
+    # env_kwargs["env_modes"]['importance_obj_goal_pos'] = 5.0
+    # env_kwargs["env_modes"]['terminated_early_penalty'] =  -10
+    # env_kwargs["env_modes"]['reached_goal_reward'] = 10
 
     env = gym.make(env_name, **env_kwargs)
     seed = 0
@@ -178,7 +188,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
         (tcp_pos_workframe, 
         tcp_rpy_workframe,
         cur_obj_pos_workframe, 
-        cur_obj_rpy_workframe) = get_states_from_obs(env, obs)
+        cur_obj_rpy_workframe) = env.get_obs_workframe()
         evaluation_result.append(np.hstack([trial, 
                                         steps_trial, 
                                         trial_pb_steps,
@@ -186,7 +196,8 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
                                         cur_obj_pos_workframe, 
                                         tcp_rpy_workframe[2],
                                         cur_obj_rpy_workframe[2],
-                                        env.goal_pos_workframe, 
+                                        env.goal_pos_workframe[0:2], 
+                                        env.goal_rpy_workframe[2],
                                         trial_reward, 
                                         False,
                                         done]))
@@ -212,7 +223,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
             (tcp_pos_workframe, 
             tcp_rpy_workframe,
             cur_obj_pos_workframe, 
-            cur_obj_rpy_workframe) = get_states_from_obs(env, obs)
+            cur_obj_rpy_workframe) = env.get_obs_workframe()
             evaluation_result.append(np.hstack([trial,
                                             steps_trial,
                                             trial_pb_steps * env._sim_time_step,
@@ -220,7 +231,8 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
                                             cur_obj_pos_workframe, 
                                             tcp_rpy_workframe[2],
                                             cur_obj_rpy_workframe[2],
-                                            env.goal_pos_workframe, 
+                                            env.goal_pos_workframe[0:2], 
+                                            env.goal_rpy_workframe[2],
                                             trial_reward, 
                                             info["tip_in_contact"],
                                             done]))
@@ -263,7 +275,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
 
     # Save data 
     evaluation_result = np.array(evaluation_result)
-    data_columns =  ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
+    data_columns =  ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_Rz', 'rewards', 'contact', 'dones']
 
     # plot evaluation results
     plot_and_save_push_plots(env, evaluation_result, data_columns, num_test_trials, evaluation_result_directory, "evaluation")
