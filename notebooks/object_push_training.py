@@ -32,7 +32,16 @@ _ = _display.start()
 
 def train_and_plot(num_trials, model_filename):
 
+    # Display device setting
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    print('Using device:', device)
+    if device == 'cuda:0':
+        print(torch.cuda.get_device_name(0))
+        print('Memory Usage:')
+        print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
+        print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3,1), 'GB')
+
+    print()
 
     # Define model working directorys
     # model_filename = 'training_model'
@@ -72,6 +81,8 @@ def train_and_plot(num_trials, model_filename):
     rl_params["env_modes"]['additional_reward_settings'] = 'john_guide_off_normal'
     rl_params["env_modes"]['terminated_early_penalty'] =  -100
     rl_params["env_modes"]['reached_goal_reward'] = 100
+    rl_params["env_modes"]['max_no_contact_steps'] = 40
+    rl_params["env_modes"]['max_tcp_to_obj_orn'] = 30/180 * np.pi,
     rl_params["env_modes"]['importance_obj_goal_pos'] = 5.0
     rl_params["env_modes"]['importance_obj_goal_orn'] = 1.0
     rl_params["env_modes"]['importance_tip_obj_orn'] = 1.0
@@ -82,7 +93,7 @@ def train_and_plot(num_trials, model_filename):
 
     # set limits and goals
     TCP_lims = np.zeros(shape=(6, 2))
-    TCP_lims[0, 0], TCP_lims[0, 1] = -0.1, 0.3  # x lims
+    TCP_lims[0, 0], TCP_lims[0, 1] = -0.1, 0.4  # x lims
     TCP_lims[1, 0], TCP_lims[1, 1] = -0.3, 0.3  # y lims
     TCP_lims[2, 0], TCP_lims[2, 1] = -0.0, 0.0  # z lims
     TCP_lims[3, 0], TCP_lims[3, 1] = -0.0, 0.0  # roll lims
@@ -92,7 +103,7 @@ def train_and_plot(num_trials, model_filename):
     # goal parameter
     goal_edges = [(0, -1), (0, 1), (1, 0)] # Top bottom and stright
     # goal_edges = [(1, 0)]
-    goal_x_max = np.float64(TCP_lims[0, 1] * 0.6).item()
+    goal_x_max = np.float64(TCP_lims[0, 1] * 0.8).item()
     goal_x_min = 0.0 # np.float64(TCP_lims[0, 0] * 0.6).item()
     goal_y_max = np.float64(TCP_lims[1, 1] * 0.6).item()
     goal_y_min = np.float64(TCP_lims[1, 0] * 0.6).item()
@@ -182,13 +193,13 @@ def train_and_plot(num_trials, model_filename):
     # agent_config_dir = os.path.join(os.getcwd(), "training_cfg", agent_config_file)
     # agent_cfg = omegaconf.OmegaConf.load(agent_config_dir)
 
-    optimizer_type = "icem"
+    optimizer_type = "cem"
     if optimizer_type == "cem":
         optimizer_cfg = {
                 "_target_": "mbrl.planning.CEMOptimizer",
-                "num_iterations": 5,
+                "num_iterations": 4,
                 "elite_ratio": 0.1,
-                "population_size": 500,
+                "population_size": 350,
                 "alpha": 0.1,
                 "device": device,
                 "lower_bound": "???",
@@ -229,7 +240,7 @@ def train_and_plot(num_trials, model_filename):
     agent_cfg = omegaconf.OmegaConf.create({
         # this class evaluates many trajectories and picks the best one
         "_target_": "mbrl.planning.TrajectoryOptimizerAgent",
-        "planning_horizon": 15,
+        "planning_horizon": 25,
         "replan_freq": 1,
         "verbose": False,
         "action_lb": "???",
@@ -257,7 +268,7 @@ def train_and_plot(num_trials, model_filename):
     )
 
     # Create a trainer for the model
-    model_trainer = models.ModelTrainer(dynamics_model, optim_lr=1e-3, weight_decay=5e-5)
+    model_trainer = models.ModelTrainer(dynamics_model, optim_lr=5e-4, weight_decay=5e-5)
 
     # Saving config files
     config_filename = 'cfg_dict'

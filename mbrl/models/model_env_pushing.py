@@ -642,11 +642,14 @@ class ModelEnvPushing:
             obj_goal_orn_dist = self.orn_obj_dist_to_goal(cur_obj_rpy_workframe)
             tip_obj_orn_dist = self.cos_tcp_dist_to_obj(cur_obj_rpy_workframe, tcp_rpy_workframe)
 
+        reward_act = torch.sum(torch.square(act), axis=1)
+
         reward = -(
             (self.env.W_obj_goal_pos * obj_goal_pos_dist)
             + (self.env.W_obj_goal_orn * obj_goal_orn_dist)
             + (self.env.W_tip_obj_orn * tip_obj_orn_dist)
-            )
+            + (self.env.W_act * reward_act))
+            
         reward = reward[:, None]
 
         return reward

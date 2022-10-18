@@ -17,7 +17,12 @@ def plot_and_save_push_plots(env, data, data_columns, trials, directory, result_
         ax.plot(df.query("trial==@trial").query("contact==@loss_contact")["tcp_x"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_y"], "g+", markersize=20)
         ax.plot(df.query("trial==@trial")["contact_x"], df.query("trial==@trial")["contact_y"], "rs", label='contact psosition')
         ax.plot(df.query("trial==@trial").query("contact==@loss_contact")["contact_x"], df.query("trial==@trial").query("contact==@loss_contact")["contact_y"], "gx", markersize=20)
-        ax.plot(df.query("trial==@trial")["goal_x"].iloc[0], df.query("trial==@trial")["goal_y"].iloc[0], "x", markersize=20, markeredgecolor="black", label="goal position")
+        ax.plot(df.query("trial==@trial").query("goal_reached==True")['goal_x'], df.query("trial==@trial").query("goal_reached==True")['goal_y'], "x", markersize=20, markeredgewidth=3, markeredgecolor="green", label="reached goal")
+        
+        # If last row is goal is not reached, plot last goal
+        if not df.query("trial==@trial")["goal_reached"].iloc[-1]:
+            ax.plot(df.query("trial==@trial")['goal_x'].iloc[-1], df.query("trial==@trial")['goal_y'].iloc[-1], "x", markersize=20, markeredgewidth=3, markeredgecolor="black", label=" not reached goal")
+
 
         # Plot orn arrows
         for i, rows in df.query("trial==@trial").iterrows():

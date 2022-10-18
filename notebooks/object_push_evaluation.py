@@ -103,10 +103,15 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     env_kwargs = omegaconf.OmegaConf.load(env_kwargs_dir)
     env_kwargs["env_modes"]['eval_mode'] = True
     env_kwargs["env_modes"]['eval_num'] = num_test_trials
-    # env_kwargs["env_modes"]['additional_reward_settings'] = 'john_guide_off_normal'
-    # env_kwargs["env_modes"]['importance_obj_goal_pos'] = 5.0
-    # env_kwargs["env_modes"]['terminated_early_penalty'] =  -10
-    # env_kwargs["env_modes"]['reached_goal_reward'] = 10
+    env_kwargs["env_modes"]['traj_type'] = 'simplex'
+    env_kwargs["env_modes"]['additional_reward_settings'] = 'default'
+    env_kwargs["env_modes"]['terminate_using_center'] = True
+    env_kwargs["env_modes"]['importance_obj_goal_pos'] = 1.0
+    env_kwargs["env_modes"]['importance_obj_goal_orn'] = 1.0
+    env_kwargs["env_modes"]['importance_tip_obj_orn'] = 1.0
+    env_kwargs["env_modes"]['x_speed_ratio'] = 1.0
+    env_kwargs["env_modes"]['terminated_early_penalty'] =  -100
+    env_kwargs["env_modes"]['reached_goal_reward'] = 100
 
     env = gym.make(env_name, **env_kwargs)
     seed = 0
@@ -126,6 +131,9 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     agent_config_file = 'agent_cfg'
     agent_config_dir = os.path.join(work_dir, agent_config_file)
     agent_cfg = omegaconf.OmegaConf.load(agent_config_dir)
+    # agent_cfg['planning_horizon'] = 20
+    # agent_cfg['optimizer_cfg']['population_size'] = 500
+    # agent_cfg['optimizer_cfg']['num_iterations'] = 5
 
     # Re-map device
     map_location = None
@@ -174,9 +182,9 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     for trial in range(num_test_trials):
         obs = env.reset()  
         # env.make_goal([0.18, 0.18])
-        if hasattr(env, 'goal_edges'):
-            if num_test_trials >= len(env.goal_edges):
-                env.make_goal(evaluate_goals[trial])
+        # if hasattr(env, 'goal_edges'):
+        #     if num_test_trials >= len(env.goal_edges):
+        #         env.make_goal(evaluate_goals[trial])
         agent.reset()
         
         done = False
@@ -198,6 +206,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
                                         cur_obj_rpy_workframe[2],
                                         env.goal_pos_workframe[0:2], 
                                         env.goal_rpy_workframe[2],
+                                        env.goal_updated,
                                         trial_reward, 
                                         False,
                                         done]))
@@ -219,6 +228,11 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
             trial_reward += reward
             trial_pb_steps += info["num_of_pb_steps"]
             steps_trial += 1
+
+            if done:
+                current_goal_reached = env.single_goal_reached
+            else:
+                current_goal_reached = env.goal_updated,
             
             (tcp_pos_workframe, 
             tcp_rpy_workframe,
@@ -233,6 +247,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
                                             cur_obj_rpy_workframe[2],
                                             env.goal_pos_workframe[0:2], 
                                             env.goal_rpy_workframe[2],
+                                            current_goal_reached,
                                             trial_reward, 
                                             info["tip_in_contact"],
                                             done]))
@@ -275,7 +290,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
 
     # Save data 
     evaluation_result = np.array(evaluation_result)
-    data_columns =  ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_Rz', 'rewards', 'contact', 'dones']
+    data_columns =  ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_Rz', 'goal_reached', 'rewards', 'contact', 'dones']
 
     # plot evaluation results
     plot_and_save_push_plots(env, evaluation_result, data_columns, num_test_trials, evaluation_result_directory, "evaluation")
