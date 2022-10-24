@@ -70,18 +70,19 @@ def make_evaluation_goals(env, num_trials):
         
         return evaluation_goals
 
+
 def evaluate_and_plot(model_filename, model_number, num_test_trials):
 
     # model_filename = 'training_model'
     # model_number = 50
     work_dir = os.path.join(os.getcwd(), model_filename)
     # work_dir = r"/home/qt21590/Documents/Projects/tactile_gym_mbrl/training_model/stochastic_icem_H25"
-    model_dir = os.path.join(work_dir, 'model_trial_{}'.format(model_number))
-    evaluation_result_directory = os.path.join(work_dir, "evaluation_result_model_{}".format(model_number))
-
-    # work_dir = r"/home/qt21590/Documents/Projects/tactile_gym_mbrl/training_model/random_goal_update_orn_john_guide_off"
-    # model_dir = work_dir
-    # evaluation_result_directory = os.path.join(work_dir, "evaluation_result")
+    if model_number:
+        model_dir = os.path.join(work_dir, 'model_trial_{}'.format(model_number))
+        evaluation_result_directory = os.path.join(work_dir, "evaluation_result_model_{}".format(model_number))
+    else:
+        model_dir = os.path.join(work_dir, 'best_model')
+        evaluation_result_directory = os.path.join(work_dir, "evaluation_result_best_model")
 
     if not os.path.exists(evaluation_result_directory):
         os.mkdir(evaluation_result_directory)
@@ -103,15 +104,17 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     env_kwargs = omegaconf.OmegaConf.load(env_kwargs_dir)
     env_kwargs["env_modes"]['eval_mode'] = True
     env_kwargs["env_modes"]['eval_num'] = num_test_trials
-    env_kwargs["env_modes"]['traj_type'] = 'simplex'
-    env_kwargs["env_modes"]['additional_reward_settings'] = 'default'
-    env_kwargs["env_modes"]['terminate_using_center'] = True
-    env_kwargs["env_modes"]['importance_obj_goal_pos'] = 1.0
-    env_kwargs["env_modes"]['importance_obj_goal_orn'] = 1.0
-    env_kwargs["env_modes"]['importance_tip_obj_orn'] = 1.0
-    env_kwargs["env_modes"]['x_speed_ratio'] = 1.0
-    env_kwargs["env_modes"]['terminated_early_penalty'] =  -100
-    env_kwargs["env_modes"]['reached_goal_reward'] = 100
+
+    ####### Other evaluation tasks ##########
+    # env_kwargs["env_modes"]['traj_type'] = 'simplex'
+    # env_kwargs["env_modes"]['additional_reward_settings'] = 'default'
+    # env_kwargs["env_modes"]['terminate_using_center'] = True
+    # env_kwargs["env_modes"]['importance_obj_goal_pos'] = 1.0
+    # env_kwargs["env_modes"]['importance_obj_goal_orn'] = 1.0
+    # env_kwargs["env_modes"]['importance_tip_obj_orn'] = 1.0
+    # env_kwargs["env_modes"]['x_speed_ratio'] = 1.0
+    # env_kwargs["env_modes"]['terminated_early_penalty'] =  -100
+    # env_kwargs["env_modes"]['reached_goal_reward'] = 100
 
     env = gym.make(env_name, **env_kwargs)
     seed = 0
@@ -316,7 +319,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_num",
         type=int,
-        default=80,
+        default=0,
         help="Model number to test for evaluation.",
     )
     parser.add_argument(

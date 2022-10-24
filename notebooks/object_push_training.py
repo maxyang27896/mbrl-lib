@@ -20,7 +20,7 @@ import mbrl.models as models
 import mbrl.planning as planning
 import mbrl.util.common as common_util
 import mbrl.util as util
-from mbrl.util.plot_and_save_push_data import plot_and_save_training
+from mbrl.util.plot_and_save_push_data import plot_and_save_training, plot_and_save_push_plots
 
 import tactile_gym.rl_envs
 from tactile_gym.sb3_helpers.params import import_parameters
@@ -29,6 +29,88 @@ from tactile_gym.rl_envs.nonprehensile_manipulation.object_push.object_push_env 
 from pyvirtualdisplay import Display
 _display = Display(visible=False, size=(1400, 900))
 _ = _display.start()
+
+# Hacky evaluation for saving computation time
+def evaluate_callback(env, agent, save_and_plot_flag=False, data_directory=None):
+    all_rewards = []
+    result = []
+    goals = np.array([
+        [0.0, 0.18], 
+        [0.0, -0.18], 
+        [0.32, 0.18],
+        [0.32, -0.18]])
+
+    for trial in range(len(goals)):
+        obs = env.reset()
+        env.make_goal(goals[trial])
+        agent.reset()
+        done = False
+        trial_reward = 0.0
+        steps_trial = 0
+        trial_pb_steps = 0.0
+
+        if save_and_plot_flag:
+            (tcp_pos_workframe, 
+            tcp_rpy_workframe,
+            cur_obj_pos_workframe, 
+            cur_obj_rpy_workframe) = env.get_obs_workframe()
+            result.append(np.hstack([trial, 
+                                    steps_trial, 
+                                    trial_pb_steps,
+                                    tcp_pos_workframe, 
+                                    cur_obj_pos_workframe, 
+                                    tcp_rpy_workframe[2],
+                                    cur_obj_rpy_workframe[2],
+                                    env.goal_pos_workframe[0:2], 
+                                    env.goal_rpy_workframe[2],
+                                    env.goal_updated,
+                                    trial_reward, 
+                                    False,
+                                    done]))
+
+        while not done:
+            
+            action = agent.act(obs, **{})
+            next_obs, reward, done, info = env.step(action)
+
+            obs = next_obs
+            trial_reward += reward
+            trial_pb_steps += info["num_of_pb_steps"]
+            steps_trial += 1
+
+            if done:
+                current_goal_reached = env.single_goal_reached
+            else:
+                current_goal_reached = env.goal_updated,
+
+            if save_and_plot_flag:
+                (tcp_pos_workframe, 
+                tcp_rpy_workframe,
+                cur_obj_pos_workframe, 
+                cur_obj_rpy_workframe) = env.get_obs_workframe()
+                result.append(np.hstack([trial,
+                                        steps_trial,
+                                        trial_pb_steps * env._sim_time_step,
+                                        tcp_pos_workframe, 
+                                        cur_obj_pos_workframe, 
+                                        tcp_rpy_workframe[2],
+                                        cur_obj_rpy_workframe[2],
+                                        env.goal_pos_workframe[0:2], 
+                                        env.goal_rpy_workframe[2],
+                                        current_goal_reached,
+                                        trial_reward, 
+                                        info["tip_in_contact"],
+                                        done]))
+        
+        all_rewards.append(trial_reward)
+
+    if save_and_plot_flag:
+        # plot evaluation results
+        result = np.array(result)
+        data_columns =  ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_Rz', 'goal_reached', 'rewards', 'contact', 'dones']
+        plot_and_save_push_plots(env, result, data_columns, len(goals), data_directory, "eval_result")
+
+    return np.sum(all_rewards)
 
 def train_and_plot(num_trials, model_filename):
 
@@ -60,14 +142,10 @@ def train_and_plot(num_trials, model_filename):
                 print('Failed to delete %s. Reason: %s' % (file_path, e))
 
     # Load the environment 
-    # env_name = 'object_push-v0'
-    # env_kwargs_file = 'env_kwargs'
-    # env_kwargs_dir = os.path.join(os.getcwd(), "training_cfg", env_kwargs_file)
-    # env_kwargs = omegaconf.OmegaConf.load(env_kwargs_dir)
     algo_name = 'ppo'
     env_name = 'object_push-v0'
     rl_params, algo_params, augmentations = import_parameters(env_name, algo_name)
-    rl_params["max_ep_len"] = 2000    
+    rl_params["max_ep_len"] = 1000    
     rl_params["env_modes"][ 'observation_mode'] = 'tactile_pose_relative_data'
     rl_params["env_modes"][ 'control_mode'] = 'TCP_position_control'
     rl_params["env_modes"]['movement_mode'] = 'TyRz'
@@ -79,10 +157,10 @@ def train_and_plot(num_trials, model_filename):
     rl_params["env_modes"]['terminate_terminate_early'] = True
 
     rl_params["env_modes"]['additional_reward_settings'] = 'john_guide_off_normal'
-    rl_params["env_modes"]['terminated_early_penalty'] =  -100
+    rl_params["env_modes"]['terminated_early_penalty'] =  -500
     rl_params["env_modes"]['reached_goal_reward'] = 100
     rl_params["env_modes"]['max_no_contact_steps'] = 40
-    rl_params["env_modes"]['max_tcp_to_obj_orn'] = 30/180 * np.pi,
+    rl_params["env_modes"]['max_tcp_to_obj_orn'] = 30/180 * np.pi
     rl_params["env_modes"]['importance_obj_goal_pos'] = 5.0
     rl_params["env_modes"]['importance_obj_goal_orn'] = 1.0
     rl_params["env_modes"]['importance_tip_obj_orn'] = 1.0
@@ -121,6 +199,7 @@ def train_and_plot(num_trials, model_filename):
         'env_modes':rl_params["env_modes"],
     }
 
+    # training environment
     env = gym.make(env_name, **env_kwargs)
     seed = 0
     env.seed(seed)
@@ -129,16 +208,6 @@ def train_and_plot(num_trials, model_filename):
     generator.manual_seed(seed)
     obs_shape = env.observation_space.shape
     act_shape = env.action_space.shape
-
-    # Load dynamics model and model environment
-    # config_file = 'cfg_dict'
-    # config_dir = os.path.join(os.getcwd(), "training_cfg", config_file)
-    # cfg = omegaconf.OmegaConf.load(config_dir)
-    # # num_trials = 80
-    # trial_length= cfg.overrides.trial_length
-    # ensemble_size = cfg.dynamics_model.ensemble_size
-    # cfg.overrides.num_steps = num_trials * cfg.overrides.trial_length
-    # cfg.algorithm.dataset_size = num_trials * cfg.overrides.trial_length
 
     trial_length = env._max_steps
     ensemble_size = 5
@@ -184,14 +253,8 @@ def train_and_plot(num_trials, model_filename):
         }
     }
     cfg = omegaconf.OmegaConf.create(cfg_dict)
-
     dynamics_model = common_util.create_one_dim_tr_model(cfg, obs_shape, act_shape)
     model_env = models.ModelEnvPushing(env, dynamics_model, termination_fn=None, reward_fn=None, generator=generator)
-
-    # Load agent
-    # agent_config_file = 'agent_cfg'
-    # agent_config_dir = os.path.join(os.getcwd(), "training_cfg", agent_config_file)
-    # agent_cfg = omegaconf.OmegaConf.load(agent_config_dir)
 
     optimizer_type = "cem"
     if optimizer_type == "cem":
@@ -260,7 +323,7 @@ def train_and_plot(num_trials, model_filename):
     replay_buffer = common_util.create_replay_buffer(cfg, obs_shape, act_shape, rng=rng)
     common_util.rollout_agent_trajectories(
         env,
-        2000, # initial exploration steps
+        initial_buffer_size, # initial exploration steps
         planning.RandomAgent(env),
         {}, # keyword arguments to pass to agent.act()
         replay_buffer=replay_buffer,
@@ -289,13 +352,21 @@ def train_and_plot(num_trials, model_filename):
     loaded = omegaconf.OmegaConf.load(env_kwargs_dir)
     assert env_kwargs == loaded
 
+    # Create eval env and agent 
+    eval_env = gym.make(env_name, **env_kwargs)
+    eval_model_env = models.ModelEnvPushing(eval_env, dynamics_model, termination_fn=None, reward_fn=None, generator=generator)
+    eval_agent = planning.create_trajectory_optim_agent_for_model(
+        eval_model_env,
+        agent_cfg,
+        num_particles=20
+    )
+
     ######### Main PETS loop #############
     all_rewards = [0]
     total_steps = [0]
     goal_reached = [0]
     training_result = []
-    plan_time = 0.0
-    train_time = 0.0
+    max_eval_reward = -np.inf
 
     # Save training data
     save_model_freqency = 5
@@ -366,7 +437,7 @@ def train_and_plot(num_trials, model_filename):
                     bootstrap_permutes=False,  # build bootstrap dataset using sampling with replacement
                 )
                 
-                start_train_time = time.time()
+                # start_train_time = time.time()
                 model_trainer.train(
                     dataset_train, 
                     dataset_val=dataset_val, 
@@ -374,13 +445,23 @@ def train_and_plot(num_trials, model_filename):
                     patience=50, 
                     callback=train_callback,
                     silent=True)
-                train_time = time.time() - start_train_time
+                # train_time = time.time() - start_train_time
 
-                # save model at regular frequencies
+                # save and evaluate model at regular frequencies
                 if (trial+1) % save_model_freqency  == 0 and trial >= 29:
                     model_dir = os.path.join(work_dir, 'model_trial_{}'.format(trial+1))
                     os.makedirs(model_dir, exist_ok=True)
                     dynamics_model.save(str(model_dir))
+
+                    # save best model
+                    total_eval_reward = evaluate_callback(eval_env, eval_agent)
+                    print("Evaluation reward: ", total_eval_reward)
+                    if total_eval_reward > max_eval_reward:
+                        max_eval_reward = total_eval_reward
+                        model_dir = os.path.join(work_dir, 'best_model')
+                        os.makedirs(model_dir, exist_ok=True)
+                        dynamics_model.save(str(model_dir))
+                        print("Saving best model at trial {} with evaluation reward {}".format(trial+1, total_eval_reward))
 
                 replay_buffer.save(work_dir)
 
@@ -450,14 +531,6 @@ def train_and_plot(num_trials, model_filename):
         ax.set_ylabel("Trial reward")
         fig.savefig(os.path.join(work_dir, "output.png"))
         plt.close(fig)
-
-    # Save all data 
-    # training_result = np.array(training_result)
-    # data_columns = ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_z', 'rewards', 'contact', 'dones']
-
-    # # Plot the training results
-    # training_result_directory = os.path.join(work_dir, "training_result")
-    # plot_and_save_push_plots(env, training_result, data_columns, num_trials, training_result_directory, "training")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
