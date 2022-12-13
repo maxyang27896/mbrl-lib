@@ -685,7 +685,7 @@ class ModelEnvPushing:
             assert initial_state.ndim in (1, 3)
             tiling_shape = (num_particles * population_size,) + tuple(
                 [1] * initial_state.ndim
-            )
+            )   
             initial_obs_batch = np.tile(initial_state, tiling_shape).astype(np.float32)
             model_state = self.reset(initial_obs_batch, return_as_np=False)
             batch_size = initial_obs_batch.shape[0]
@@ -706,3 +706,58 @@ class ModelEnvPushing:
 
             total_rewards = total_rewards.reshape(-1, num_particles)
             return total_rewards.mean(dim=1)
+
+    def rollout_model_env(
+        self,
+        initial_state: np.ndarray,
+        action_sequences: torch.tensor,
+        num_particles: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Rolls out an environment model.
+
+        Executes a plan on a dynamics model.
+
+        Args:
+            model_env (:class:`mbrl.models.ModelEnv`): the dynamics model environment to simulate.
+            initial_obs (np.ndarray): initial observation to start the episodes.
+            plan (np.ndarray, optional): sequence of actions to execute.
+            agent (:class:`mbrl.planning.Agent`): an agent to generate a plan before
+                execution starts (as in `agent.plan(initial_obs)`). If given, takes precedence
+                over ``plan``.
+            num_samples (int): how many samples to take from the model (i.e., independent rollouts).
+                Defaults to 1.
+
+        Returns:
+            (tuple of np.ndarray): the observations, rewards, and actions observed, respectively.
+
+        """
+        with torch.no_grad():
+            assert len(action_sequences.shape) == 3
+            population_size, horizon, action_dim = action_sequences.shape
+            # either 1-D state or 3-D pixel observation
+            assert initial_state.ndim in (1, 3)
+            tiling_shape = (num_particles * population_size,) + tuple(
+                [1] * initial_state.ndim
+            )   
+
+            initial_obs_batch = np.tile(initial_state, tiling_shape).astype(np.float32)
+            model_state = self.reset(initial_obs_batch, return_as_np=True)
+            batch_size = initial_obs_batch.shape[0]
+            self.reset_batch_goals(batch_size)
+
+            obs_history = []
+            reward_history = []
+            obs_history.append(initial_obs_batch)           
+            for time_step in range(horizon):
+                action_for_step = action_sequences[:, time_step, :]
+                action_batch = torch.repeat_interleave(
+                    action_for_step, num_particles, dim=0
+                )
+                next_obs, reward, dones, model_state = self.step(
+                    action_batch, model_state, sample=False
+                )
+                obs_history.append(next_obs)
+                reward_history.append(reward)
+                
+        return np.stack(obs_history), np.stack(reward_history)
+

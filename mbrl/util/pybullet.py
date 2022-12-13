@@ -136,6 +136,7 @@ class PybulletEnvHandler(EnvHandler):
         lost_contact_count = env.lost_contact_count
         last_contact_pos = env.last_contact_pos
         reset_counter = env.reset_counter
+        targ_traj_list_id = env.targ_traj_list_id
         
     
         pickle_bytes = pickle.dumps(env)
@@ -145,7 +146,8 @@ class PybulletEnvHandler(EnvHandler):
             contact_obs_after_action,
             lost_contact_count,
             last_contact_pos,
-            reset_counter
+            reset_counter,
+            targ_traj_list_id
         )
 
     @staticmethod
@@ -158,7 +160,8 @@ class PybulletEnvHandler(EnvHandler):
             contact_obs_after_action,
             lost_contact_count,
             last_contact_pos,
-            reset_counter
+            reset_counter,
+            targ_traj_list_id
         ) = state
         new_env = env_dict["env"]
         new_env._env_step_counter = _env_step_counter
@@ -166,6 +169,7 @@ class PybulletEnvHandler(EnvHandler):
         new_env.lost_contact_count = lost_contact_count
         new_env.last_contact_pos = last_contact_pos
         new_env.reset_counter = reset_counter
+        new_env.targ_traj_list_id = targ_traj_list_id
         env_dict["env"] = new_env
         PybulletEnvHandler.load_state_from_file(env_dict["env"] ._pb, filename)
 

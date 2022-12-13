@@ -32,6 +32,29 @@ _display = Display(visible=False, size=(1400, 900))
 _ = _display.start()
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
+DATA_COLUMN =  [
+    'trial',
+    'trial_steps', 
+    'time_steps', 
+    'tcp_x',
+    'tcp_y',
+    'tcp_z',
+    'contact_x', 
+    'contact_y', 
+    'contact_z', 
+    'tcp_Rz', 
+    'contact_Rz', 
+    'goal_x', 
+    'goal_y', 
+    'goal_Rz',
+    'action_y',
+    'action_Rz',
+    'goal_reached', 
+    'rewards', 
+    'contact', 
+    'dones',
+    ]
+
 def make_evaluation_goals(env, num_trials):
 
         # Create evenly distributed goals along the edge
@@ -104,6 +127,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     env_kwargs = omegaconf.OmegaConf.load(env_kwargs_dir)
     env_kwargs["env_modes"]['eval_mode'] = True
     env_kwargs["env_modes"]['eval_num'] = num_test_trials
+
 
     ####### Other evaluation tasks ##########
     # env_kwargs["env_modes"]['traj_type'] = 'simplex'
@@ -201,18 +225,19 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
         cur_obj_pos_workframe, 
         cur_obj_rpy_workframe) = env.get_obs_workframe()
         evaluation_result.append(np.hstack([trial, 
-                                        steps_trial, 
-                                        trial_pb_steps,
-                                        tcp_pos_workframe, 
-                                        cur_obj_pos_workframe, 
-                                        tcp_rpy_workframe[2],
-                                        cur_obj_rpy_workframe[2],
-                                        env.goal_pos_workframe[0:2], 
-                                        env.goal_rpy_workframe[2],
-                                        env.goal_updated,
-                                        trial_reward, 
-                                        False,
-                                        done]))
+                                            steps_trial, 
+                                            trial_pb_steps,
+                                            tcp_pos_workframe, 
+                                            cur_obj_pos_workframe, 
+                                            tcp_rpy_workframe[2],
+                                            cur_obj_rpy_workframe[2],
+                                            env.goal_pos_workframe[0:2], 
+                                            env.goal_rpy_workframe[2],
+                                            np.array([0, 0]),
+                                            env.goal_updated,
+                                            trial_reward, 
+                                            False,
+                                            done]))
 
         while not done:
 
@@ -242,18 +267,19 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
             cur_obj_pos_workframe, 
             cur_obj_rpy_workframe) = env.get_obs_workframe()
             evaluation_result.append(np.hstack([trial,
-                                            steps_trial,
-                                            trial_pb_steps * env._sim_time_step,
-                                            tcp_pos_workframe, 
-                                            cur_obj_pos_workframe, 
-                                            tcp_rpy_workframe[2],
-                                            cur_obj_rpy_workframe[2],
-                                            env.goal_pos_workframe[0:2], 
-                                            env.goal_rpy_workframe[2],
-                                            current_goal_reached,
-                                            trial_reward, 
-                                            info["tip_in_contact"],
-                                            done]))
+                                                steps_trial,
+                                                trial_pb_steps * env._sim_time_step,
+                                                tcp_pos_workframe, 
+                                                cur_obj_pos_workframe, 
+                                                tcp_rpy_workframe[2],
+                                                cur_obj_rpy_workframe[2],
+                                                env.goal_pos_workframe[0:2], 
+                                                env.goal_rpy_workframe[2],
+                                                action,
+                                                current_goal_reached,
+                                                trial_reward, 
+                                                info["tip_in_contact"],
+                                                done]))
 
             # use record_every_n_frames to reduce size sometimes
             if save_vid and steps_trial % record_every_n_frames == 0:
@@ -293,10 +319,9 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
 
     # Save data 
     evaluation_result = np.array(evaluation_result)
-    data_columns =  ['trial','trial_steps', 'time_steps', 'tcp_x','tcp_y','tcp_z','contact_x', 'contact_y', 'contact_z', 'tcp_Rz', 'contact_Rz', 'goal_x', 'goal_y', 'goal_Rz', 'goal_reached', 'rewards', 'contact', 'dones']
 
     # plot evaluation results
-    plot_and_save_push_plots(env, evaluation_result, data_columns, num_test_trials, evaluation_result_directory, "evaluation")
+    plot_and_save_push_plots(env, evaluation_result, DATA_COLUMN, num_test_trials, evaluation_result_directory, "evaluation")
 
     # Plot evaluation results
     fig, ax = plt.subplots(figsize=(12, 6))

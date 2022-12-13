@@ -458,6 +458,49 @@ def rollout_model_env(
     return np.stack(obs_history), np.stack(reward_history), plan
 
 
+def rollout_model_push_env(
+    model_env: mbrl.models.ModelEnv,
+    initial_obs: np.ndarray,
+    plan: Optional[np.ndarray] = None,
+    agent: Optional[mbrl.planning.Agent] = None,
+    num_samples: int = 1,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Rolls out an environment model.
+
+    Executes a plan on a dynamics model.
+
+    Args:
+         model_env (:class:`mbrl.models.ModelEnv`): the dynamics model environment to simulate.
+         initial_obs (np.ndarray): initial observation to start the episodes.
+         plan (np.ndarray, optional): sequence of actions to execute.
+         agent (:class:`mbrl.planning.Agent`): an agent to generate a plan before
+            execution starts (as in `agent.plan(initial_obs)`). If given, takes precedence
+            over ``plan``.
+        num_samples (int): how many samples to take from the model (i.e., independent rollouts).
+            Defaults to 1.
+
+    Returns:
+        (tuple of np.ndarray): the observations, rewards, and actions observed, respectively.
+
+    """
+    obs_history = []
+    reward_history = []
+    if agent:
+        plan = agent.plan(initial_obs[None, :])
+    initial_obs = np.tile(initial_obs, (num_samples, 1))
+    model_state = model_env.reset(initial_obs, return_as_np=True)
+    batch_size = initial_obs.shape[0]
+    model_env.reset_batch_goals(batch_size)
+    obs_history.append(initial_obs)
+    for action in plan:
+        next_obs, reward, done, model_state = model_env.step(
+            np.tile(action, (num_samples, 1)), model_state, sample=False
+        )
+        obs_history.append(next_obs)
+        reward_history.append(reward)
+    return np.stack(obs_history), np.stack(reward_history), plan
+
+
 def rollout_agent_trajectories(
     env: gym.Env,
     steps_or_trials_to_collect: int,

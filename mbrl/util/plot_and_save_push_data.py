@@ -45,7 +45,7 @@ def plot_and_save_push_plots(env, data, data_columns, trials, directory, result_
         fig_xy.savefig(os.path.join(directory, "workframe_plot_trial_{}.png".format(trial)))
         plt.close(fig_xy)
 
-        fig_time_xy, axs = plt.subplots(2, 2, figsize=(14, 7.5), gridspec_kw={"width_ratios": [1, 1]})
+        fig_time_xy, axs = plt.subplots(3, 2, figsize=(14, 7.5), gridspec_kw={"width_ratios": [1, 1]})
         axs[0, 0].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["tcp_x"], "bs", label='tcp ')
         axs[0, 0].plot(df.query("trial==@trial").query("contact==@loss_contact")["time_steps"], df.query("trial==@trial").query("contact==@loss_contact")["tcp_x"], "g+", markersize=20)
         axs[0, 0].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["contact_x"], "rs", label='contact')
@@ -81,6 +81,18 @@ def plot_and_save_push_plots(env, data, data_columns, trials, directory, result_
         axs[1, 1].set_ylabel("contact Rz tcp workframe")
         axs[1, 1].set_ylim(-np.deg2rad(10), np.deg2rad(30))
         axs[1, 1].grid()
+
+        axs[2, 0].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["action_y"], "r-", label='action_y')
+        axs[2, 0].set_xlabel("Time steps (s)")
+        axs[2, 0].set_ylabel("action y")
+        axs[2, 0].set_ylim(-0.3, 0.3)
+        axs[2, 0].grid()
+
+        axs[2, 1].plot(df.query("trial==@trial")["time_steps"], df.query("trial==@trial")["action_Rz"], "r-", label='action Rz')
+        axs[2, 1].set_xlabel("Time steps (s)")
+        axs[2, 1].set_ylabel("action Rz")
+        axs[2, 1].set_ylim(-0.3, 0.3)
+        axs[2, 1].grid()
         
         fig_time_xy.savefig(os.path.join(directory, "time_plot_trial_{}.png".format(trial)))
         plt.close(fig_time_xy)
