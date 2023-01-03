@@ -127,6 +127,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     env_kwargs = omegaconf.OmegaConf.load(env_kwargs_dir)
     env_kwargs["env_modes"]['eval_mode'] = True
     env_kwargs["env_modes"]['eval_num'] = num_test_trials
+    env_kwargs["env_modes"]['goal_list'] = [[0.1, 0.18]]
 
 
     ####### Other evaluation tasks ##########
@@ -139,6 +140,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     # env_kwargs["env_modes"]['x_speed_ratio'] = 1.0
     # env_kwargs["env_modes"]['terminated_early_penalty'] =  -100
     # env_kwargs["env_modes"]['reached_goal_reward'] = 100
+    # env_kwargs["env_modes"]['mpc_goal_orn_update'] = True
 
     env = gym.make(env_name, **env_kwargs)
     seed = 0
@@ -158,7 +160,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     agent_config_file = 'agent_cfg'
     agent_config_dir = os.path.join(work_dir, agent_config_file)
     agent_cfg = omegaconf.OmegaConf.load(agent_config_dir)
-    # agent_cfg['planning_horizon'] = 20
+    agent_cfg['planning_horizon'] = 40
     # agent_cfg['optimizer_cfg']['population_size'] = 500
     # agent_cfg['optimizer_cfg']['num_iterations'] = 5
 
@@ -208,7 +210,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
     evaluate_time = time.time()
     for trial in range(num_test_trials):
         obs = env.reset()  
-        # env.make_goal([0.18, 0.18])
+        # env.make_goal([0.1, 0.18])
         # if hasattr(env, 'goal_edges'):
         #     if num_test_trials >= len(env.goal_edges):
         #         env.make_goal(evaluate_goals[trial])

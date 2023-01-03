@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 import time
 from typing import Callable, List, Optional, Sequence, Tuple, cast
+import functools
 
 import hydra
 import numpy as np

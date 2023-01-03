@@ -4,7 +4,9 @@ exp/
 .vscode
 .idea
 .mypy_cache
+mbrl/diagnostics/saved_control
 notebooks/.ipynb_checkpoints
+notebooks/saved_control
 notebooks/saved_model
 notebooks/training_cfg
 notebooks/training_model
