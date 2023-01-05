@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 import pathlib
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
+from functools import reduce
 
 import gym.wrappers
 import hydra
@@ -80,9 +81,11 @@ def create_one_dim_tr_model(
     if model_cfg._target_ == "mbrl.models.BasicEnsemble":
         model_cfg = model_cfg.member_cfg
     if model_cfg.get("in_size", None) is None:
-        model_cfg.in_size = obs_shape[0] + (act_shape[0] if act_shape else 1)
+        # model_cfg.in_size = obs_shape[0] + (act_shape[0] if act_shape else 1)
+        model_cfg.in_size = obs_shape[0] * obs_shape[1] + (obs_shape[0] * act_shape[0] if act_shape else obs_shape[0] * 1)
     if model_cfg.get("out_size", None) is None:
-        model_cfg.out_size = obs_shape[0] + int(cfg.algorithm.learned_rewards)
+        # model_cfg.out_size = obs_shape[0] + int(cfg.algorithm.learned_rewards)
+        model_cfg.out_size = obs_shape[-1] + int(cfg.algorithm.learned_rewards)
 
     # Now instantiate the model
     model = hydra.utils.instantiate(cfg.dynamics_model)
