@@ -16,7 +16,7 @@ def _consolidate_batches(batches: Sequence[TransitionBatch]) -> TransitionBatch:
     b0 = batches[0]
     obs = np.empty((len_batches,) + b0.obs.shape, dtype=b0.obs.dtype)
     act = np.empty((len_batches,) + b0.act.shape, dtype=b0.act.dtype)
-    next_obs = np.empty((len_batches,) + b0.obs.shape, dtype=b0.obs.dtype)
+    next_obs = np.empty((len_batches,) + b0.next_obs.shape, dtype=b0.obs.dtype)
     rewards = np.empty((len_batches,) + b0.rewards.shape, dtype=np.float32)
     dones = np.empty((len_batches,) + b0.dones.shape, dtype=bool)
     for i, b in enumerate(batches):
@@ -434,6 +434,7 @@ class ReplayBuffer:
         reward_type: Type = np.float32,
         rng: Optional[np.random.Generator] = None,
         max_trajectory_length: Optional[int] = None,
+        next_obs_shape: Sequence[int] = None,
     ):
         self.cur_idx = 0
         self.capacity = capacity
@@ -443,9 +444,11 @@ class ReplayBuffer:
         if max_trajectory_length:
             self.trajectory_indices = []
             capacity += max_trajectory_length
+        if not next_obs_shape:
+            next_obs_shape = obs_shape
         # TODO replace all of these with a transition batch
         self.obs = np.empty((capacity, *obs_shape), dtype=obs_type)
-        self.next_obs = np.empty((capacity, *obs_shape), dtype=obs_type)
+        self.next_obs = np.empty((capacity, *next_obs_shape), dtype=obs_type)
         self.action = np.empty((capacity, *action_shape), dtype=action_type)
         self.reward = np.empty(capacity, dtype=reward_type)
         self.done = np.empty(capacity, dtype=bool)

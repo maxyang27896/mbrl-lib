@@ -58,7 +58,7 @@ class TransitionBatch:
         return TransitionBatch(
             self.obs.reshape(self._get_new_shape(self.obs.shape, batch_size)),
             self.act.reshape(self._get_new_shape(self.act.shape, batch_size)),
-            self.next_obs.reshape(self._get_new_shape(self.obs.shape, batch_size)),
+            self.next_obs.reshape(self._get_new_shape(self.next_obs.shape, batch_size)),
             self.rewards.reshape(self._get_new_shape(self.rewards.shape, batch_size)),
             self.dones.reshape(self._get_new_shape(self.dones.shape, batch_size)),
         )

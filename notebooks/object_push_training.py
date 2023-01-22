@@ -1,10 +1,9 @@
-from calendar import TUESDAY
 from IPython import display
 import argparse
 import cv2
 import copy
+from collections import deque
 import gym
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -14,18 +13,14 @@ import omegaconf
 import time
 import torch
 
-import mbrl.env.cartpole_continuous as cartpole_env
-import mbrl.env.reward_fns as reward_fns
-import mbrl.env.termination_fns as termination_fns
 import mbrl.models as models
 import mbrl.planning as planning
 import mbrl.util.common as common_util
-import mbrl.util as util
 from mbrl.util.plot_and_save_push_data import plot_and_save_training, plot_and_save_push_plots
+from mbrl.util.eval_agent import eval_and_save_vid
 
 import tactile_gym.rl_envs
 from tactile_gym.sb3_helpers.params import import_parameters
-from tactile_gym.rl_envs.nonprehensile_manipulation.object_push.object_push_env import get_states_from_obs
 
 from pyvirtualdisplay import Display
 _display = Display(visible=False, size=(1400, 900))
@@ -53,92 +48,6 @@ DATA_COLUMN =  [
     'contact', 
     'dones',
     ]
-
-# Hacky evaluation for saving computation time
-def evaluate_callback(env, agent, save_and_plot_flag=False, data_directory=None):
-    all_rewards = []
-    result = []
-    goals = np.array([
-        [0.0, 0.18], 
-        [0.0, -0.18], 
-        [0.12, 0.18],
-        [0.12, -0.18],
-        [0.32, 0.18],
-        [0.32, -0.18],
-        [0.32, 0.0]])
-
-    for trial in range(len(goals)):
-        obs = env.reset()
-        env.make_goal(goals[trial])
-        agent.reset()
-        done = False
-        trial_reward = 0.0
-        steps_trial = 0
-        trial_pb_steps = 0.0
-
-        if save_and_plot_flag:
-            (tcp_pos_workframe, 
-            tcp_rpy_workframe,
-            cur_obj_pos_workframe, 
-            cur_obj_rpy_workframe) = env.get_obs_workframe()
-            result.append(np.hstack([trial, 
-                                    steps_trial, 
-                                    trial_pb_steps,
-                                    tcp_pos_workframe, 
-                                    cur_obj_pos_workframe, 
-                                    tcp_rpy_workframe[2],
-                                    cur_obj_rpy_workframe[2],
-                                    env.goal_pos_workframe[0:2], 
-                                    env.goal_rpy_workframe[2],
-                                    np.array([0, 0]),
-                                    env.goal_updated,
-                                    trial_reward, 
-                                    False,
-                                    done]))
-
-        while not done:
-            
-            action = agent.act(obs, **{})
-            next_obs, reward, done, info = env.step(action)
-
-            obs = next_obs
-            trial_reward += reward
-            trial_pb_steps += info["num_of_pb_steps"]
-            steps_trial += 1
-
-            if done:
-                current_goal_reached = env.single_goal_reached
-            else:
-                current_goal_reached = env.goal_updated,
-
-            if save_and_plot_flag:
-                (tcp_pos_workframe, 
-                tcp_rpy_workframe,
-                cur_obj_pos_workframe, 
-                cur_obj_rpy_workframe) = env.get_obs_workframe()
-                result.append(np.hstack([trial,
-                                        steps_trial,
-                                        trial_pb_steps * env._sim_time_step,
-                                        tcp_pos_workframe, 
-                                        cur_obj_pos_workframe, 
-                                        tcp_rpy_workframe[2],
-                                        cur_obj_rpy_workframe[2],
-                                        env.goal_pos_workframe[0:2], 
-                                        env.goal_rpy_workframe[2],
-                                        action,
-                                        current_goal_reached,
-                                        trial_reward, 
-                                        info["tip_in_contact"],
-                                        done]))
-        
-        all_rewards.append(trial_reward)
-
-    if save_and_plot_flag:
-        # plot evaluation results
-        result = np.array(result)
-        plot_and_save_push_plots(env, result, DATA_COLUMN, len(goals), data_directory, "eval_result")
-
-    return np.mean(all_rewards)
 
 def train_and_plot(num_trials, model_filename, eval_best, record_video):
 
@@ -197,7 +106,7 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     rl_params["env_modes"]['importance_obj_goal_orn'] = 1.0
     rl_params["env_modes"]['importance_tip_obj_orn'] = 1.0
 
-    rl_params["env_modes"]['mpc_goal_orn_update'] = True
+    rl_params["env_modes"]['mpc_goal_orn_update'] = False
     rl_params["env_modes"]['goal_orn_update_freq'] = 'every_step'
 
 
@@ -226,6 +135,7 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     env_kwargs={
         'show_gui':False,
         'show_tactile':False,
+        'states_stacked_len': 4,
         'max_steps':rl_params["max_ep_len"],
         'image_size':rl_params["image_size"],
         'env_modes':rl_params["env_modes"],
@@ -240,12 +150,18 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     generator.manual_seed(seed)
     obs_shape = env.observation_space.shape
     act_shape = env.action_space.shape
+    history_len = env.states_stacked_len
+    step_obs_shape = (obs_shape[-1], )
+    step_act_shape = act_shape
+    stacked_obs_shape = (obs_shape[-1] * history_len, )
+    stacked_act_shape = (history_len * act_shape[-1], )
 
     trial_length = env._max_steps
     ensemble_size = 5
     initial_buffer_size = 2000
     buffer_size = num_trials * trial_length
     target_normalised = True
+    using_history_of_obs = True
     cfg_dict = {
         # dynamics model configuration
         "dynamics_model": {
@@ -274,7 +190,8 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
             "target_is_delta": True,
             "normalize": True,
             "target_normalize": target_normalised,
-            "dataset_size": buffer_size
+            "dataset_size": buffer_size,
+            "using_history_of_obs": using_history_of_obs,
         },
         # these are experiment specific options
         "overrides": {
@@ -335,7 +252,7 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     agent_cfg = omegaconf.OmegaConf.create({
         # this class evaluates many trajectories and picks the best one
         "_target_": "mbrl.planning.TrajectoryOptimizerAgent",
-        "planning_horizon": 25,
+        "planning_horizon": 45,
         "replan_freq": 1,
         "verbose": False,
         "action_lb": "???",
@@ -352,18 +269,19 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     )
 
     # create buffer
-    replay_buffer = common_util.create_replay_buffer(cfg, obs_shape, act_shape, rng=rng)
+    replay_buffer = common_util.create_replay_buffer(cfg, stacked_obs_shape, stacked_act_shape, rng=rng, next_obs_shape=(obs_shape[-1], ))
     common_util.rollout_agent_trajectories(
         env,
         initial_buffer_size, # initial exploration steps
         planning.RandomAgent(env),
         {}, # keyword arguments to pass to agent.act()
         replay_buffer=replay_buffer,
-        trial_length=trial_length
+        trial_length=trial_length,
+        stacking=using_history_of_obs
     )
 
     # Create a trainer for the model
-    model_trainer = models.ModelTrainer(dynamics_model, optim_lr=5e-4, weight_decay=5e-5)
+    model_trainer = models.ModelTrainer(dynamics_model, optim_lr=1e-4, weight_decay=1e-4)
 
     # Saving config files
     config_filename = 'cfg_dict'
@@ -385,9 +303,10 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     assert env_kwargs == loaded
 
     # Create eval env and agent 
+    num_eval_episodes = 7
     eval_env_kwargs = copy.deepcopy(env_kwargs)
     eval_env_kwargs["env_modes"]['eval_mode'] = True
-    eval_env_kwargs["env_modes"]['eval_num'] = 4
+    eval_env_kwargs["env_modes"]['eval_num'] = num_eval_episodes
     eval_env = gym.make(env_name, **eval_env_kwargs)
     eval_model_env = models.ModelEnvPushing(eval_env, dynamics_model, termination_fn=None, reward_fn=None, generator=generator)
     eval_agent = planning.create_trajectory_optim_agent_for_model(
@@ -426,6 +345,7 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
         # Reset 
         obs = env.reset()    
         agent.reset()
+        stacked_act = deque(np.zeros((env.states_stacked_len, *env.action_space.shape)), maxlen=env.states_stacked_len)
         done = False
         trial_reward = 0.0
         trial_pb_steps = 0.0
@@ -479,8 +399,8 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
                 model_trainer.train(
                     dataset_train, 
                     dataset_val=dataset_val, 
-                    num_epochs=50, 
-                    patience=50, 
+                    num_epochs=25, 
+                    patience=25, 
                     callback=train_callback,
                     silent=True)
                 # train_time = time.time() - start_train_time
@@ -488,20 +408,15 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
                 # save and evaluate model at regular frequencies
                 if (trial+1) % save_model_freqency  == 0 and trial >= start_saving:
                     
-                    # save at frequency
+                    # save at frequency of trials
                     if not eval_best:
                         model_dir = os.path.join(work_dir, 'model_trial_{}'.format(trial+1))
                         os.makedirs(model_dir, exist_ok=True)
                         dynamics_model.save(str(model_dir))
 
                     # save best model
-                    else:
-
-                        # eval_dir = os.path.join(work_dir, 'temp_eval')
-                        # os.makedirs(eval_dir, exist_ok=True)
-                        # total_eval_reward = evaluate_callback(eval_env, eval_agent, save_and_plot_flag=True, data_directory=eval_dir)
-                        
-                        total_eval_reward = evaluate_callback(eval_env, eval_agent)
+                    else:                       
+                        total_eval_reward = eval_and_save_vid(eval_env, eval_agent, n_eval_episodes=num_eval_episodes)
                         all_eval_rewards.append(total_eval_reward)
                         total_steps_eval.append(total_steps_train[-1])
                         print("Evaluation reward: ", total_eval_reward)
@@ -516,8 +431,8 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
 
             # --- Doing env step using the agent and adding to model dataset ---
             # start_plan_time = time.time()
-            next_obs, reward, done, info = common_util.step_env_and_add_to_buffer(
-                env, obs, agent, {}, replay_buffer)
+            next_obs, reward, done, info = common_util.step_env_and_add_to_buffer_stacked(
+                env, obs, agent, {}, replay_buffer, stacked_action=stacked_act)
             # plan_time = time.time() - start_plan_time
 
             obs = next_obs

@@ -654,7 +654,7 @@ class TrajectoryOptimizerAgent(Agent):
         self.optimizer.reset()
 
     def act(
-        self, obs: np.ndarray, optimizer_callback: Optional[Callable] = None, **_kwargs
+        self, obs: np.ndarray, act: np.ndarray = None, optimizer_callback: Optional[Callable] = None, **_kwargs
     ) -> np.ndarray:
         """Issues an action given an observation.
 
@@ -679,7 +679,7 @@ class TrajectoryOptimizerAgent(Agent):
         if not self.actions_to_use:  # re-plan is necessary
 
             def trajectory_eval_fn(action_sequences):
-                return self.trajectory_eval_fn(obs, action_sequences)
+                return self.trajectory_eval_fn(obs, action_sequences, act)
 
             start_time = time.time()
             plan = self.optimizer.optimize(
@@ -694,7 +694,7 @@ class TrajectoryOptimizerAgent(Agent):
             print(f"Planning time: {plan_time:.3f}")
         return action
 
-    def plan(self, obs: np.ndarray, **_kwargs) -> np.ndarray:
+    def plan(self, obs: np.ndarray, act: np.ndarray = None, **_kwargs) -> np.ndarray:
         """Issues a sequence of actions given an observation.
 
         Returns s sequence of length self.planning_horizon.
@@ -711,7 +711,7 @@ class TrajectoryOptimizerAgent(Agent):
             )
 
         def trajectory_eval_fn(action_sequences):
-            return self.trajectory_eval_fn(obs, action_sequences)
+            return self.trajectory_eval_fn(obs, action_sequences, act)
 
         plan = self.optimizer.optimize(trajectory_eval_fn)
         return plan
@@ -741,9 +741,9 @@ def create_trajectory_optim_agent_for_model(
     complete_agent_cfg(model_env, agent_cfg)
     agent = hydra.utils.instantiate(agent_cfg)
 
-    def trajectory_eval_fn(initial_state, action_sequences):
+    def trajectory_eval_fn(initial_state, action_sequences, initial_action):
         return model_env.evaluate_action_sequences(
-            action_sequences, initial_state=initial_state, num_particles=num_particles
+            action_sequences, initial_state=initial_state, num_particles=num_particles, initial_action=initial_action
         )
 
     agent.set_trajectory_eval_fn(trajectory_eval_fn)

@@ -618,6 +618,7 @@ class ModelEnvPushing:
         action_sequences: torch.Tensor,
         initial_state: np.ndarray,
         num_particles: int,
+        initial_action: np.ndarray = None,
     ) -> torch.Tensor:
         """Evaluates a batch of action sequences on the model.
 
@@ -638,10 +639,17 @@ class ModelEnvPushing:
             population_size, horizon, action_dim = action_sequences.shape
             # either 1-D state or 3-D pixel observation
             assert initial_state.ndim in (1, 3)
-            tiling_shape = (num_particles * population_size,) + tuple(
+            if type(initial_action) != np.ndarray:
+                initial_action = np.zeros(action_dim)
+            tiling_shape_state = (num_particles * population_size,) + tuple(
                 [1] * initial_state.ndim
             )   
-            initial_obs_batch = np.tile(initial_state, tiling_shape).astype(np.float32)
+            tiling_shape_action = (num_particles * population_size,) + tuple(
+                [1] * initial_action.ndim
+            )   
+            initial_obs_batch = np.tile(initial_state, tiling_shape_state).astype(np.float32)
+            previous_act_batch =  np.tile(initial_action, tiling_shape_action).astype(np.float32)
+            previous_act_batch = model_util.to_tensor(previous_act_batch).to(torch.float32).to(self.device)
             model_state = self.reset(initial_obs_batch, return_as_np=False)
             batch_size = initial_obs_batch.shape[0]
             total_rewards = torch.zeros(batch_size, 1).to(self.device)
@@ -652,9 +660,12 @@ class ModelEnvPushing:
                 action_batch = torch.repeat_interleave(
                     action_for_step, num_particles, dim=0
                 )
+                action_batch = torch.cat([previous_act_batch, action_batch], dim=action_batch.ndim - 1)
+                action_batch = action_batch[..., action_sequences.shape[-1]:]
                 _, rewards, dones, model_state = self.step(
                     action_batch, model_state, sample=True
                 )
+                previous_act_batch = action_batch
                 rewards[terminated] = 0
                 terminated |= dones
                 total_rewards += rewards

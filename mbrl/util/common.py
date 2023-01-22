@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 import pathlib
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
-from functools import reduce
+from collections import deque
 
 import gym.wrappers
 import hydra
@@ -78,14 +78,20 @@ def create_one_dim_tr_model(
     # This first part takes care of the case where model is BasicEnsemble and in/out sizes
     # are handled by member_cfg
     model_cfg = cfg.dynamics_model
+    if cfg.algorithm.get("using_history_of_obs", None) is None:
+        cfg.algorithm.using_history_of_obs = False
     if model_cfg._target_ == "mbrl.models.BasicEnsemble":
         model_cfg = model_cfg.member_cfg
     if model_cfg.get("in_size", None) is None:
-        # model_cfg.in_size = obs_shape[0] + (act_shape[0] if act_shape else 1)
-        model_cfg.in_size = obs_shape[0] * obs_shape[1] + (obs_shape[0] * act_shape[0] if act_shape else obs_shape[0] * 1)
+        if cfg.algorithm.using_history_of_obs:
+            model_cfg.in_size = obs_shape[0] * obs_shape[1] + (obs_shape[0] * act_shape[0] if act_shape else obs_shape[0] * 1)
+        else:
+            model_cfg.in_size = obs_shape[0] + (act_shape[0] if act_shape else 1)
     if model_cfg.get("out_size", None) is None:
-        # model_cfg.out_size = obs_shape[0] + int(cfg.algorithm.learned_rewards)
-        model_cfg.out_size = obs_shape[-1] + int(cfg.algorithm.learned_rewards)
+        if cfg.algorithm.using_history_of_obs:
+            model_cfg.out_size = obs_shape[-1] + int(cfg.algorithm.learned_rewards)
+        else:
+            model_cfg.out_size = obs_shape[0] + int(cfg.algorithm.learned_rewards)
 
     # Now instantiate the model
     model = hydra.utils.instantiate(cfg.dynamics_model)
@@ -110,6 +116,7 @@ def create_one_dim_tr_model(
         obs_process_fn=obs_process_fn,
         no_delta_list=cfg.overrides.get("no_delta_list", None),
         num_elites=cfg.overrides.get("num_elites", None),
+        using_history_of_obs=cfg.algorithm.using_history_of_obs,
     )
     if model_dir:
         dynamics_model.load(model_dir)
@@ -147,6 +154,7 @@ def create_replay_buffer(
     load_dir: Optional[Union[str, pathlib.Path]] = None,
     collect_trajectories: bool = False,
     rng: Optional[np.random.Generator] = None,
+    next_obs_shape: Sequence[int] = None,
 ) -> ReplayBuffer:
     """Creates a replay buffer from a given configuration.
 
@@ -204,6 +212,7 @@ def create_replay_buffer(
         reward_type=reward_type,
         rng=rng,
         max_trajectory_length=maybe_max_trajectory_len,
+        next_obs_shape=next_obs_shape,
     )
 
     if load_dir:
@@ -514,6 +523,7 @@ def rollout_agent_trajectories(
     replay_buffer: Optional[ReplayBuffer] = None,
     collect_full_trajectories: bool = False,
     agent_uses_low_dim_obs: bool = False,
+    stacking: bool = False,
 ) -> List[float]:
     """Rollout agent trajectories in the given environment.
 
@@ -567,9 +577,11 @@ def rollout_agent_trajectories(
         agent.reset()
         done = False
         total_reward = 0.0
+        stacked_action = deque(np.zeros((env.states_stacked_len, *env.action_space.shape)), maxlen=env.states_stacked_len)
         while not done:
             if replay_buffer is not None:
-                next_obs, reward, done, info = step_env_and_add_to_buffer(
+                if stacking:
+                    next_obs, reward, done, info = step_env_and_add_to_buffer_stacked(
                     env,
                     obs,
                     agent,
@@ -577,7 +589,18 @@ def rollout_agent_trajectories(
                     replay_buffer,
                     callback=callback,
                     agent_uses_low_dim_obs=agent_uses_low_dim_obs,
+                    stacked_action=stacked_action,
                 )
+                else:
+                    next_obs, reward, done, info = step_env_and_add_to_buffer(
+                        env,
+                        obs,
+                        agent,
+                        agent_kwargs,
+                        replay_buffer,
+                        callback=callback,
+                        agent_uses_low_dim_obs=agent_uses_low_dim_obs,
+                    )
             else:
                 if agent_uses_low_dim_obs:
                     raise RuntimeError(
@@ -586,8 +609,14 @@ def rollout_agent_trajectories(
                     )
                 action = agent.act(obs, **agent_kwargs)
                 next_obs, reward, done, info = env.step(action)
+                if stacking:
+                    stacked_action.append(action)
+                    action = np.array(stacked_action)
                 if callback:
-                    callback((env, obs, action, next_obs, reward, done, info))
+                    if stacking:
+                        callback((env, obs.reshape(-1), action.reshape(-1), next_obs[-1], reward, done, info))
+                    else:
+                        callback((env, obs, action, next_obs, reward, done, info))
             obs = next_obs
             total_reward += reward
             step += 1
@@ -651,4 +680,58 @@ def step_env_and_add_to_buffer(
     replay_buffer.add(obs, action, next_obs, reward, done)
     if callback:
         callback((env, obs, action, next_obs, reward, done, info))
+    return next_obs, reward, done, info
+
+
+def step_env_and_add_to_buffer_stacked(
+    env: gym.Env,
+    obs: np.ndarray,
+    agent: mbrl.planning.Agent,
+    agent_kwargs: Dict,
+    replay_buffer: ReplayBuffer,
+    callback: Optional[Callable] = None,
+    agent_uses_low_dim_obs: bool = False,
+    stacked_action: deque = None, 
+) -> Tuple[np.ndarray, float, bool, Dict]:
+    """Steps the environment with an agent's action and populates the replay buffer.
+
+    Args:
+        env (gym.Env): the environment to step.
+        obs (np.ndarray): the latest observation returned by the environment (used to obtain
+            an action from the agent).
+        agent (:class:`mbrl.planning.Agent`): the agent used to generate an action.
+        agent_kwargs (dict): any keyword arguments to pass to `agent.act()` method.
+        replay_buffer (:class:`mbrl.util.ReplayBuffer`): the replay buffer
+            containing stored data.
+        callback (callable, optional): a function that will be called using the generated
+            transition data `(obs, action. next_obs, reward, done)`.
+        agent_uses_low_dim_obs (bool): only valid if env is of type
+            :class:`mbrl.env.MujocoGymPixelWrapper`. If ``True``, instead of passing the obs
+            produced by env.reset/step to the agent, it will pass
+            obs = env.get_last_low_dim_obs(). This is useful for rolling out an agent
+            trained with low dimensional obs, but collect pixel obs in the replay buffer.
+
+    Returns:
+        (tuple): next observation, reward, done and meta-info, respectively, as generated by
+        `env.step(agent.act(obs))`.
+    """
+
+    if agent_uses_low_dim_obs and not hasattr(env, "get_last_low_dim_obs"):
+        raise RuntimeError(
+            "Option agent_uses_low_dim_obs is only compatible with "
+            "env of type mbrl.env.MujocoGymPixelWrapper."
+        )
+    if agent_uses_low_dim_obs:
+        agent_obs = getattr(env, "get_last_low_dim_obs")()
+    else:
+        agent_obs = obs.reshape(-1)
+    if not isinstance(stacked_action, deque):
+        stacked_action = deque(np.zeros((env.states_stacked_len, *env.action_space.shape)), maxlen=env.states_stacked_len)
+    action = agent.act(agent_obs, np.array(stacked_action).reshape(-1), **agent_kwargs)
+    next_obs, reward, done, info = env.step(action)
+    stacked_action.append(action)
+    action = np.array(stacked_action).reshape(-1)
+    replay_buffer.add(obs.reshape(-1), action, next_obs[-1], reward, done)
+    if callback:
+        callback((env, obs.reshape(-1), action.reshape(-1), next_obs[-1], reward, done, info))
     return next_obs, reward, done, info

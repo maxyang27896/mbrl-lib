@@ -81,6 +81,7 @@ class OneDTransitionRewardModel(Model):
         obs_process_fn: Optional[mbrl.types.ObsProcessFnType] = None,
         no_delta_list: Optional[List[int]] = None,
         num_elites: Optional[int] = None,
+        using_history_of_obs: bool = False,
     ):
         super().__init__(model.device)
         self.model = model
@@ -120,6 +121,8 @@ class OneDTransitionRewardModel(Model):
         if not num_elites and isinstance(self.model, Ensemble):
             self.num_elites = self.model.num_members
 
+        self.using_history_of_obs = using_history_of_obs
+
     def _get_model_input(
         self,
         obs: mbrl.types.TensorType,
@@ -140,11 +143,17 @@ class OneDTransitionRewardModel(Model):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         obs, action, next_obs, reward, _ = batch.astuple()
         if self.target_is_delta:
-            target_obs = next_obs - obs
+            if self.using_history_of_obs:
+                target_obs = next_obs - obs[..., -next_obs.shape[-1]:] # Get last state from obs
+            else:   
+                target_obs = next_obs - obs
             for dim in self.no_delta_list:
                 target_obs[..., dim] = next_obs[..., dim]
         else:
             target_obs = next_obs
+
+        # if self.using_history_of_obs:
+        #     target_obs = target_obs[:, -1, :]
         target_obs = model_util.to_tensor(target_obs).to(self.device)
         
         if self.target_normalizer:
@@ -187,13 +196,21 @@ class OneDTransitionRewardModel(Model):
 
         if (self.input_normalizer):
             model_in_np = np.concatenate([obs, action], axis=obs.ndim - 1)
+            # if self.using_history_of_obs:
+            #     model_in_np = model_in_np.reshape(*model_in_np.shape[:1], -1)
             self.input_normalizer.update_stats(model_in_np)
         
         if (self.target_normalizer):
             if self.target_is_delta:
-                target_obs = next_obs - obs
+                if self.using_history_of_obs:
+                    target_obs = next_obs - obs[..., -next_obs.shape[-1]:]
+                else:   
+                    target_obs = next_obs - obs
             else:
                 target_obs = next_obs
+
+            # if self.using_history_of_obs:
+            #     target_obs = target_obs[:, -1, :]
             self.target_normalizer.update_stats(target_obs)
 
     def loss(
@@ -319,12 +336,19 @@ class OneDTransitionRewardModel(Model):
 
         next_observs = preds[:, :-1] if self.learned_rewards else preds
         if self.target_is_delta:
-            tmp_ = next_observs + obs
+            if self.using_history_of_obs:
+                tmp_ = next_observs + obs[..., -next_observs.shape[-1]:]
+            else:
+                tmp_ = next_observs + obs
             for dim in self.no_delta_list:
                 tmp_[:, dim] = next_observs[:, dim]
             next_observs = tmp_
         rewards = preds[:, -1:] if self.learned_rewards else None
-        next_model_state["obs"] = next_observs
+        if self.using_history_of_obs:
+            next_model_state["obs"] = torch.cat([obs, next_observs], dim=obs.ndim - 1)
+            next_model_state["obs"] = next_model_state["obs"][..., next_observs.shape[-1]:]
+        else:
+            next_model_state["obs"] = next_observs
         return next_observs, rewards, None, next_model_state
 
     def reset(
