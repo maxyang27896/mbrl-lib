@@ -5,6 +5,7 @@
 import abc
 import pathlib
 from typing import Any, Union
+from math import prod
 
 import gym
 import hydra
@@ -96,7 +97,7 @@ def complete_agent_cfg(
         if key in cfg.keys() and key not in cfg:
             setattr(cfg, key, value)
 
-    _check_and_replace("num_inputs", obs_shape[0], agent_cfg)
+    _check_and_replace("num_inputs", prod(obs_shape), agent_cfg)
     if "action_space" in agent_cfg.keys() and isinstance(
         agent_cfg.action_space, omegaconf.DictConfig
     ):
@@ -107,7 +108,7 @@ def complete_agent_cfg(
         _check_and_replace("shape", env.action_space.shape, agent_cfg.action_space)
 
     if "obs_dim" in agent_cfg.keys() and "obs_dim" not in agent_cfg:
-        agent_cfg.obs_dim = obs_shape[0]
+        agent_cfg.obs_dim = prod(obs_shape)
     if "action_dim" in agent_cfg.keys() and "action_dim" not in agent_cfg:
         agent_cfg.action_dim = act_shape[0]
     if "action_range" in agent_cfg.keys() and "action_range" not in agent_cfg:

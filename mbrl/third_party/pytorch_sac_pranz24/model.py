@@ -53,10 +53,14 @@ class QNetwork(nn.Module):
 
         x1 = F.relu(self.linear1(xu))
         x1 = F.relu(self.linear2(x1))
+        # x1 = torch.tanh(self.linear1(xu))
+        # x1 = torch.tanh(self.linear2(x1))
         x1 = self.linear3(x1)
 
         x2 = F.relu(self.linear4(xu))
         x2 = F.relu(self.linear5(x2))
+        # x2 = torch.tanh(self.linear4(xu))
+        # x2 = torch.tanh(self.linear5(x2))
         x2 = self.linear6(x2)
 
         return x1, x2
@@ -87,6 +91,8 @@ class GaussianPolicy(nn.Module):
     def forward(self, state):
         x = F.relu(self.linear1(state))
         x = F.relu(self.linear2(x))
+        # x = torch.tanh(self.linear1(state))
+        # x = torch.tanh(self.linear2(x))
         mean = self.mean_linear(x)
         log_std = self.log_std_linear(x)
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)

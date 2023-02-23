@@ -19,6 +19,21 @@ import tactile_gym.rl_envs
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
+def clear_and_create_dir(dir):
+    if not os.path.exists(dir):
+        os.mkdir(dir)
+    else:
+        for filename in os.listdir(dir):
+            file_path = os.path.join(dir, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print('Failed to delete %s. Reason: %s' % (file_path, e))
+
+
 def evaluate_and_plot(model_filename, model_number, num_test_trials):
 
     # model_filename = 'training_model'
@@ -32,18 +47,7 @@ def evaluate_and_plot(model_filename, model_number, num_test_trials):
         model_dir = os.path.join(work_dir, 'best_model')
         evaluation_result_directory = os.path.join(work_dir, "evaluation_result_best_model")
 
-    if not os.path.exists(evaluation_result_directory):
-        os.mkdir(evaluation_result_directory)
-    else:
-        for filename in os.listdir(evaluation_result_directory):
-            file_path = os.path.join(evaluation_result_directory, filename)
-            try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-            except Exception as e:
-                print('Failed to delete %s. Reason: %s' % (file_path, e))
+    clear_and_create_dir(evaluation_result_directory)
 
     # Load the environment 
     env_name = 'object_push-v0'

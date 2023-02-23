@@ -562,3 +562,48 @@ def quaternion_rotation_matrix(quaternion: torch.Tensor) -> torch.Tensor:
     return torch.stack([1.0 - (yy + zz), xy - wz, xz + wy,
                         xy + wz, 1.0 - (xx + zz), yz - wx,
                         xz - wy, yz + wx, 1.0 - (xx + yy)], 1)
+
+
+def quaternions_product(quaternion0, quaternion1):
+
+    if isinstance(quaternion0, np.ndarray):
+        x0, y0, z0, w0 = np.split(quaternion0, 4, axis=-1)
+        x1, y1, z1, w1 = np.split(quaternion1, 4, axis=-1)
+        return np.concatenate(
+            (x1*w0 + y1*z0 - z1*y0 + w1*x0,
+            -x1*z0 + y1*w0 + z1*x0 + w1*y0,
+            x1*y0 - y1*x0 + z1*w0 + w1*z0,
+            -x1*x0 - y1*y0 - z1*z0 + w1*w0),
+            axis=-1)
+
+    else:
+        x0, y0, z0, w0 = torch.tensor_split(quaternion0, 4, dim=-1)
+        x1, y1, z1, w1 = torch.tensor_split(quaternion1, 4, dim=-1)
+        return torch.concat(
+            (x1*w0 + y1*z0 - z1*y0 + w1*x0,
+            -x1*z0 + y1*w0 + z1*x0 + w1*y0,
+            x1*y0 - y1*x0 + z1*w0 + w1*z0,
+            -x1*x0 - y1*y0 - z1*z0 + w1*w0),
+            axis=-1)
+
+
+def get_inverse_quaternion(orn_batched):
+
+    if isinstance(orn_batched, np.ndarray):
+        conj_orn = orn_batched.copy()
+        conj_orn[:, :3] = -conj_orn[:, :3] 
+        norm_orn = np.linalg.norm(orn_batched, axis=-1)
+    else:
+        conj_orn = orn_batched.clone()
+        conj_orn[:, :3] = -conj_orn[:, :3] 
+        norm_orn = torch.linalg.norm(orn_batched, axis=-1).unsqueeze(1)
+
+    return conj_orn/norm_orn
+
+def get_orn_diff(orn_1, orn_2):
+    """
+    Calculate the difference between two orientaion quaternion in the same frame 
+    of reference
+    """
+    return quaternions_product(orn_1, get_inverse_quaternion(orn_2))
+

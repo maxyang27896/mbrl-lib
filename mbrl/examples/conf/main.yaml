@@ -1,7 +1,7 @@
 defaults:
-  - algorithm: pets
+  - algorithm: mbpo
   - dynamics_model: gaussian_mlp_ensemble
-  - overrides: pets_cartpole
+  - overrides: mbpo_cartpole
   - action_optimizer: cem
 
 seed: 0

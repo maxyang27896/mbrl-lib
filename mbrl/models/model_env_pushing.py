@@ -14,8 +14,7 @@ import mbrl.types
 
 from . import Model
 
-from mbrl.util.math import euler_to_quaternion, quaternion_rotation_matrix
-
+from mbrl.util.math import euler_to_quaternion, quaternion_rotation_matrix, get_orn_diff
 class ModelEnvPushing:
     """Wraps a dynamics model into a gym-like environment.
 
@@ -139,8 +138,8 @@ class ModelEnvPushing:
                 rng=self._rng,
             )
             # Update goal orn in mpc only if current obs outside of sensitive zone
-            if self.mpc_goal_orn_update and self.env.xyz_obj_dist_to_goal() > 0.1: 
-                self.update_goal_orn(next_observs)
+            if self.mpc_goal_orn_update: 
+                self.update_step_data(next_observs)
                 
             rewards = (
                 pred_rewards
@@ -162,41 +161,56 @@ class ModelEnvPushing:
 
     def reset_batch_goals(
         self, 
-        batch_size: int
+        batch_size: int,
+        sample_goals: bool = False,
+        goal_batch: Optional[np.ndarray] = np.array([]),
         ):
         '''
         Set the goal batches and target_ids to match with current goals of the gym
         environment.
         '''
-        self.targ_traj_list_id = torch.tensor(self.env.targ_traj_list_id).to(self.device)
-        if self.targ_traj_list_id < 0:
-            print("Error targ_traj_list_id is below 0, the gym environment has not been reset.")
+
+        if sample_goals:
+            self.goal_pos_workframe_batch = np.empty((batch_size, 3))
+            self.goal_pos_workframe_batch[:, 0:2] = self.sample_batch_goals(batch_size)
+            self.goal_pos_workframe_batch = model_util.to_tensor(self.goal_pos_workframe_batch).to(torch.float32).to(self.device)
         
-        self.traj_pos_workframe = model_util.to_tensor(copy.deepcopy(self.env.traj_pos_workframe)).to(torch.float32).to(self.device)
-        self.traj_rpy_workframe = model_util.to_tensor(copy.deepcopy(self.env.traj_rpy_workframe)).to(torch.float32).to(self.device)
-        self.traj_orn_workframe = model_util.to_tensor(copy.deepcopy(self.env.traj_orn_workframe)).to(torch.float32).to(self.device)
-
-        self.goal_pos_workframe = self.traj_pos_workframe[self.targ_traj_list_id]
-        self.goal_rpy_workframe = self.traj_rpy_workframe[self.targ_traj_list_id]
-        if self.task == "goal_pos":
-            self.goal_orn_workframe = model_util.to_tensor(copy.deepcopy(self.env.goal_orn_workframe)).to(torch.float32).to(self.device)
         else:
-            self.goal_orn_workframe = self.traj_orn_workframe[self.targ_traj_list_id]
+            if goal_batch.size != 0:
+                self.goal_pos_workframe_batch = model_util.to_tensor(goal_batch).to(torch.float32).to(self.device)
+            else:   
+                # Initialise variables from gym environments
+                self.targ_traj_list_id = torch.tensor(self.env.targ_traj_list_id).to(self.device)
+                if self.targ_traj_list_id < 0:
+                    print("Error targ_traj_list_id is below 0, the gym environment has not been reset.")
+                
+                self.traj_pos_workframe = model_util.to_tensor(copy.deepcopy(self.env.traj_pos_workframe)).to(torch.float32).to(self.device)
+                self.traj_orn_workframe = model_util.to_tensor(copy.deepcopy(self.env.traj_orn_workframe)).to(torch.float32).to(self.device)
 
-        # Create the batches needed to evaluate actions
-        self.targ_traj_list_id_batch = torch.tile(self.targ_traj_list_id, (batch_size,))
-        self.goal_pos_workframe_batch = torch.tile(self.goal_pos_workframe, 
-                                        (batch_size,) 
-                                        + tuple([1] * self.goal_pos_workframe.ndim))
+                self.goal_pos_workframe = self.traj_pos_workframe[self.targ_traj_list_id]
+                if self.task == "goal_pos":
+                    self.goal_orn_workframe = model_util.to_tensor(copy.deepcopy(self.env.goal_orn_workframe)).to(torch.float32).to(self.device)
+                else:
+                    self.goal_orn_workframe = self.traj_orn_workframe[self.targ_traj_list_id]
 
-        self.goal_orn_workframe_batch = torch.tile(self.goal_orn_workframe, 
-                                        (batch_size,) 
-                                        + tuple([1] * self.goal_orn_workframe.ndim))
+                # Create the batches needed to evaluate actions
+                self.goal_pos_workframe_batch = torch.tile(self.goal_pos_workframe, 
+                                                (batch_size,) 
+                                                + tuple([1] * self.goal_pos_workframe.ndim))
+                self.goal_orn_workframe_batch = torch.tile(self.goal_orn_workframe, 
+                                                (batch_size,) 
+                                                + tuple([1] * self.goal_orn_workframe.ndim))
 
-        self.goal_obs = model_util.to_tensor(copy.deepcopy(self.env.get_goal_obs())).to(torch.float32).to(self.device)
-        self.goal_obs_batch = torch.tile(self.goal_obs, 
-                                        (batch_size,) 
-                                        + tuple([1] * self.goal_obs.ndim))
+        # Get reward weights
+        self.W_obj_goal_pos = torch.tensor(self.env.W_obj_goal_pos).to(self.device)
+        self.W_obj_goal_orn = torch.tensor(self.env.W_obj_goal_orn).to(self.device)
+        self.W_tip_obj_orn = torch.tensor(self.env.W_tip_obj_orn).to(self.device)
+        self.W_act = torch.tensor(self.env.W_act).to(self.device)
+
+        self.W_obj_goal_pos_batch = torch.tile(self.W_obj_goal_pos, (batch_size,))
+        self.W_obj_goal_orn_batch = torch.tile(self.W_obj_goal_orn, (batch_size,))
+        self.W_tip_obj_orn_batch = torch.tile(self.W_tip_obj_orn, (batch_size,))
+        self.W_act_batch = torch.tile(self.W_act, (batch_size,))
         
     def outside_tcp_lims(self, cur_obj_pos_workframe, tcp_to_obj_orn, tip_to_obj_pos):
         '''
@@ -210,21 +224,64 @@ class ModelEnvPushing:
                 (cur_obj_pos_workframe[:, 1] > self.TCP_lims[1, 1]) |
                 (tcp_to_obj_orn > self.max_tcp_to_obj_orn) | 
                 (tip_to_obj_pos > self.max_tip_to_obj_pos))
-            # (xyz_tcp_dist_to_obj > self.env.obj_width / 2))           # TODO: exiting episode when roughly lose contact
     
-    def update_goal_orn(
+    def sample_batch_goals(
+        self, 
+        batch_size: int
+    ):
+        return np.array([self.env.random_single_goal() for _ in range(batch_size)])
+
+    def get_agent_obs(
+        self,
+        obs: np.ndarray,
+        goal: Optional[np.ndarray] = np.array([]),
+    ) -> np.ndarray:
+
+        if 'goal_aware' in self.observation_mode:
+            return obs
+
+        agent_obs = torch.zeros(obs.shape, dtype=torch.float32).to(self.device)
+        agent_obs[:, 0:4] = model_util.to_tensor(obs[:, 0:4]).to(torch.float32).to(self.device)
+
+        cur_obj_pos_workframe = torch.zeros((len(obs), 3), dtype=torch.float32).to(self.device)
+        cur_obj_orn_workframe = torch.zeros((len(obs), 4), dtype=torch.float32).to(self.device)
+        cur_obj_pos_workframe[:, 0:2] = model_util.to_tensor(obs[:, 4:6]).to(torch.float32).to(self.device)
+        cur_obj_orn_workframe[:, 2:4] = model_util.to_tensor(obs[:, 6:8]).to(torch.float32).to(self.device)
+
+        if goal.size != 0:
+            goal_pos_workframe = model_util.to_tensor(goal).to(torch.float32).to(self.device)
+            goal_rpy_workframe = torch.zeros((len(obs), 3), dtype=torch.float32).to(self.device)
+            goal_rpy_workframe[:, 2] = torch.atan2(-cur_obj_pos_workframe[:, 1] + goal_pos_workframe[:, 1], 
+                                                        -cur_obj_pos_workframe[:, 0] + goal_pos_workframe[:, 0])
+            goal_orn_workframe = euler_to_quaternion(goal_rpy_workframe)
+
+            cur_obj_to_goal_pos_workframe = cur_obj_pos_workframe - goal_pos_workframe
+            cur_obj_to_goal_orn_workframe = get_orn_diff(cur_obj_orn_workframe, goal_orn_workframe)
+        else:
+            cur_obj_to_goal_pos_workframe = cur_obj_pos_workframe - self.goal_pos_workframe_batch
+            cur_obj_to_goal_orn_workframe = get_orn_diff(cur_obj_orn_workframe, self.goal_orn_workframe_batch)
+
+        agent_obs[:, 4:6] = cur_obj_to_goal_pos_workframe[:, 0:2]
+        agent_obs[:, 6:8] = cur_obj_to_goal_orn_workframe[:, 2:4]
+
+        return agent_obs.cpu().numpy()
+
+    def update_step_data(
         self,
         next_obs: torch.Tensor
     ):
+        if isinstance(next_obs, torch.Tensor):
+            obs = next_obs
+        else:
+            obs = model_util.to_tensor(next_obs).to(torch.float32).to(self.device)
 
         if self.observation_mode == 'tactile_pose_data' or self.observation_mode == 'tactile_pose_relative_data':
             if self.planar_states == True:
-                goal_rpy_workframe_batch = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
-                goal_rpy_workframe_batch[:, 2] = torch.atan2(-next_obs[:, 5] + self.goal_pos_workframe_batch[:, 1], 
-                                                            -next_obs[:, 4] + self.goal_pos_workframe_batch[:, 0])
+                goal_rpy_workframe_batch = torch.zeros((len(obs), 3), dtype=torch.float32).to(self.device)
+                goal_rpy_workframe_batch[:, 2] = torch.atan2(-obs[:, 5] + self.goal_pos_workframe_batch[:, 1], 
+                                                            -obs[:, 4] + self.goal_pos_workframe_batch[:, 0])
 
                 self.goal_orn_workframe_batch = euler_to_quaternion(goal_rpy_workframe_batch)
-
         else:
             NotImplemented
         
@@ -325,13 +382,40 @@ class ModelEnvPushing:
                 NotImplemented
 
             # Calculate distance between goal and current positon
-            obj_goal_pos_dist = torch.linalg.norm(next_obs[:, 4:6] - self.goal_obs_batch[:, 4:6], axis=1)
+            obj_goal_pos_dist = self.xyz_obj_dist_to_goal(cur_obj_pos_workframe)
 
             # calculate tcp to object orn
-            abs_tcp_to_obj_orn = self.get_orn_dist(next_obs[:, 2:4], self.goal_obs_batch[:, 2:4])
+            abs_tcp_to_obj_orn = self.get_orn_norm(tcp_obj_orn_workframe)
 
             # Calculate tip to obj distance 
-            tip_to_obj_pos = torch.linalg.norm(next_obs[:, 0:2], axis=1)
+            tip_to_obj_pos = torch.linalg.norm(tcp_obj_pos_workframe, axis=1)
+
+        elif self.observation_mode == 'goal_aware_tactile_pose_relative_data':
+
+            if self.planar_states == True:
+                tcp_obj_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                tcp_obj_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+                cur_obj_pos_to_goal_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                cur_obj_orn_to_goal_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+
+                tcp_obj_pos_workframe[:, 0:2] = next_obs[:, 0:2]
+                tcp_obj_orn_workframe[:, 2:4] = next_obs[:, 2:4]
+                cur_obj_pos_to_goal_workframe[:, 0:2] = next_obs[:, 4:6]
+                cur_obj_orn_to_goal_workframe[:, 2:4] = next_obs[:, 6:8]
+            else:   
+                NotImplemented
+
+            # Calculate distance between goal and current positon
+            obj_goal_pos_dist = torch.linalg.norm(cur_obj_pos_to_goal_workframe, axis=1)
+
+            # calculate tcp to object orn
+            abs_tcp_to_obj_orn = self.get_orn_norm(tcp_obj_orn_workframe)
+
+            # Calculate tip to obj distance 
+            tip_to_obj_pos = torch.linalg.norm(tcp_obj_pos_workframe, axis=1)
+
+            # Calculate distance between goal and current obj positon
+            cur_obj_pos_workframe = cur_obj_pos_to_goal_workframe[:, 0:2] + self.goal_pos_workframe_batch[:, 0:2]
             
         # Default oracle observations
         else:
@@ -348,23 +432,17 @@ class ModelEnvPushing:
             # Calculate distance between goal and current positon
             obj_goal_pos_dist = torch.linalg.norm(cur_obj_pos_workframe - self.goal_pos_workframe_batch, axis=1)
 
-        # Update goals index if for those that subgoals reached
-        self.targ_traj_list_id_batch[obj_goal_pos_dist < self.termination_pos_dist] += 1
-
         # Create terminated vector, terminated is true if last subgoal is reached
         terminated = torch.zeros((batch_size, 1), dtype=bool).to(self.device)
-        terminated[self.targ_traj_list_id_batch >= self.traj_n_points] = True
-        rewards[self.targ_traj_list_id_batch >= self.traj_n_points] += self.reached_goal_reward
+        terminated[obj_goal_pos_dist < self.termination_pos_dist] = True
+        rewards[obj_goal_pos_dist < self.termination_pos_dist] += self.reached_goal_reward
 
         # Early termination if outside of the tcp limits
         if self.terminate_early:
             outside_tcp_lims_idx = self.outside_tcp_lims(cur_obj_pos_workframe, abs_tcp_to_obj_orn, tip_to_obj_pos)
             terminated[outside_tcp_lims_idx] = True
             rewards[outside_tcp_lims_idx] += self.terminated_early_penalty        # Add a penalty for exiting the TCP limits
-        
-        # Update goal position batch for none terminated samples
-        self.goal_pos_workframe_batch[~terminated[:,0]] = self.traj_pos_workframe[self.targ_traj_list_id_batch[~terminated[:,0]]]
-
+    
         return terminated
 
     def xyz_obj_dist_to_goal(
@@ -577,9 +655,24 @@ class ModelEnvPushing:
             obj_goal_orn_dist = self.orn_obj_dist_to_goal(cur_obj_orn_workframe)
             tip_obj_orn_dist = self.get_orn_norm(tcp_obj_orn_workframe)
 
-            # obj_goal_pos_dist = self.get_pos_diff(next_obs[:, 4:6], self.goal_obs_batch[:, 4:6])
-            # obj_goal_orn_dist = self.get_orn_dist(next_obs[:, 6:8], self.goal_obs_batch[:, 6:8])
-            # tip_obj_orn_dist = self.get_orn_dist(next_obs[:, 2:4], self.goal_obs_batch[:, 2:4])
+        elif self.observation_mode == 'goal_aware_tactile_pose_relative_data':
+
+            if self.planar_states == True:
+                tcp_obj_pos_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                tcp_obj_orn_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+                cur_obj_pos_to_goal_workframe = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
+                cur_obj_orn_to_goal_workframe = torch.zeros((len(next_obs), 4), dtype=torch.float32).to(self.device)
+
+                tcp_obj_pos_workframe[:, 0:2] = next_obs[:, 0:2]
+                tcp_obj_orn_workframe[:, 2:4] = next_obs[:, 2:4]
+                cur_obj_pos_to_goal_workframe[:, 0:2] = next_obs[:, 4:6]
+                cur_obj_orn_to_goal_workframe[:, 2:4] = next_obs[:, 6:8]
+            else:   
+                NotImplemented
+
+            obj_goal_pos_dist = self.get_pos_dist(cur_obj_pos_to_goal_workframe)
+            obj_goal_orn_dist = self.get_orn_norm(cur_obj_orn_to_goal_workframe)
+            tip_obj_orn_dist = self.get_orn_norm(tcp_obj_orn_workframe)
         
         else:
             # tcp_pos_workframe = next_obs[:, 0:3]
@@ -599,11 +692,17 @@ class ModelEnvPushing:
 
         reward_act = torch.sum(torch.square(act), axis=1)
 
+        if self.env.additional_reward_settings == 'john_guide_off_normal':
+            approach_zone_idx = obj_goal_pos_dist < 0.1
+            self.W_obj_goal_pos_batch[approach_zone_idx] = self.env.importance_obj_goal_pos
+            self.W_obj_goal_orn_batch[approach_zone_idx] = 0.0 
+            self.W_tip_obj_orn_batch[approach_zone_idx] = self.env.importance_obj_goal_pos / 5.0
+
         reward = -(
-            (self.env.W_obj_goal_pos * obj_goal_pos_dist)
-            + (self.env.W_obj_goal_orn * obj_goal_orn_dist)
-            + (self.env.W_tip_obj_orn * tip_obj_orn_dist)
-            + (self.env.W_act * reward_act))
+            (self.W_obj_goal_pos_batch * obj_goal_pos_dist)
+            + (self.W_obj_goal_orn_batch * obj_goal_orn_dist)
+            + (self.W_tip_obj_orn_batch * tip_obj_orn_dist)
+            + (self.W_act_batch * reward_act))
             
         reward = reward[:, None]
 

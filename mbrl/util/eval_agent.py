@@ -45,6 +45,7 @@ def eval_and_save_vid(
         render=False,
         data_directory=None,
         print_ep_reward=False,
+        agent_kwargs={},
     ):
     
     if save_vid:
@@ -96,7 +97,7 @@ def eval_and_save_vid(
         while not done:
 
             # --- Doing env step using the agent and adding to model dataset ---
-            action = agent.act(obs.reshape(-1), np.array(stacked_act).reshape(-1), **{})
+            action = agent.act(obs.reshape(-1), np.array(stacked_act).reshape(-1), **agent_kwargs)
             next_obs, reward, done, info = eval_env.step(action)
 
             if render:

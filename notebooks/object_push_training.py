@@ -49,6 +49,31 @@ DATA_COLUMN =  [
     'dones',
     ]
 
+
+def plot_and_save(y_data, x_data=None, title=None, xlabel=None, ylabel=None, work_dir=None):
+
+    fig, ax = plt.subplots(1, 2, figsize=(14, 10))
+
+    for i in range(2):
+
+        if not x_data:
+            ax[i].plot(y_data[i])
+        else:   
+            ax[i].plot(x_data[i], y_data[i])
+        
+        if title:
+            ax[i].set_title(title[i])
+        if xlabel:
+            ax[i].set_xlabel(xlabel[i])
+        if ylabel:
+            ax[i].set_ylabel(ylabel[i])
+
+    if not work_dir:
+        work_dir = os.getcwd()
+
+    fig.savefig(os.path.join(work_dir, "losses.png"))
+    plt.close(fig)
+
 def train_and_plot(num_trials, model_filename, eval_best, record_video):
 
     # Display device setting
@@ -83,7 +108,7 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     env_name = 'object_push-v0'
     rl_params, algo_params, augmentations = import_parameters(env_name, algo_name)
     rl_params["max_ep_len"] = 1000    
-    rl_params["env_modes"][ 'observation_mode'] = 'tactile_pose_relative_data'
+    rl_params["env_modes"][ 'observation_mode'] = 'goal_aware_tactile_pose_relative_data'
     rl_params["env_modes"][ 'control_mode'] = 'TCP_position_control'
     rl_params["env_modes"]['movement_mode'] = 'TyRz'
     rl_params["env_modes"]['traj_type'] = 'point'
@@ -156,10 +181,29 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     stacked_obs_shape = (obs_shape[-1] * history_len, )
     stacked_act_shape = (history_len * act_shape[-1], )
 
-    trial_length = env._max_steps
+    rl_training_params = {
+        "num_trials": num_trials,
+        "trial_length": env._max_steps,
+        "initial_buffer_size": 1000,
+        "buffer_size": num_trials * env._max_steps,
+    }    
+
+    model_params = {
+        "ensemble_size": 5,
+        "num_layers": 3,
+        "hidden_size": 200,
+        "model_lr": 1e-4,
+        "model_wd": 1e-4,
+        "model_batch_size": 32,
+        "validation_ratio": 0.0,
+        "patience": 25,
+        "num_epochs_train_model": 25,
+    }
+
+    trial_length = rl_training_params['trial_length']
     ensemble_size = 5
-    initial_buffer_size = 2000
-    buffer_size = num_trials * trial_length
+    initial_buffer_size = rl_training_params['initial_buffer_size']
+    buffer_size = rl_training_params['buffer_size']
     target_normalised = True
     using_history_of_obs = True
     cfg_dict = {
@@ -167,9 +211,9 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
         "dynamics_model": {
             "_target_": "mbrl.models.GaussianMLP",
             "device": device,
-            "num_layers": 3,
+            "num_layers": model_params["num_layers"],
             "ensemble_size": ensemble_size,
-            "hid_size": 200,
+            "hid_size": model_params["hidden_size"],
             "in_size": "???",
             "out_size": "???",
             "deterministic": False,
@@ -197,27 +241,39 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
         "overrides": {
             "trial_length": trial_length,
             "num_steps": num_trials * trial_length,
-            "model_batch_size": 32,
-            "validation_ratio": 0.05
+            "model_batch_size": model_params["model_batch_size"],
+            "validation_ratio": model_params["validation_ratio"],
         }
     }
     cfg = omegaconf.OmegaConf.create(cfg_dict)
     dynamics_model = common_util.create_one_dim_tr_model(cfg, obs_shape, act_shape)
     model_env = models.ModelEnvPushing(env, dynamics_model, termination_fn=None, reward_fn=None, generator=generator)
 
+
     optimizer_type = "cem"
     if optimizer_type == "cem":
+        agent_params = {
+            "num_of_particles": 20,
+            "planning_horizon": 35,
+            "replan_frequency": 1,
+            "num_iterations": 4,
+            "elite_ratio": 0.1,
+            "population_size": 350,
+            "alpha": 0.1,
+            "return_mean_elites": True,
+            "clipped_normal": False
+        }
         optimizer_cfg = {
                 "_target_": "mbrl.planning.CEMOptimizer",
-                "num_iterations": 4,
-                "elite_ratio": 0.1,
-                "population_size": 350,
-                "alpha": 0.1,
+                "num_iterations": agent_params["num_iterations"],
+                "elite_ratio": agent_params["elite_ratio"],
+                "population_size": agent_params["population_size"],
+                "alpha": agent_params["alpha"],
                 "device": device,
                 "lower_bound": "???",
                 "upper_bound": "???",
-                "return_mean_elites": True,
-                "clipped_normal": False
+                "return_mean_elites": agent_params["return_mean_elites"],
+                "clipped_normal": agent_params["clipped_normal"],
             }
     elif optimizer_type == "mppi":
         optimizer_cfg = {
@@ -252,8 +308,8 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     agent_cfg = omegaconf.OmegaConf.create({
         # this class evaluates many trajectories and picks the best one
         "_target_": "mbrl.planning.TrajectoryOptimizerAgent",
-        "planning_horizon": 45,
-        "replan_freq": 1,
+        "planning_horizon": agent_params["planning_horizon"],
+        "replan_freq": agent_params["replan_frequency"],
         "verbose": False,
         "action_lb": "???",
         "action_ub": "???",
@@ -265,7 +321,7 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     agent = planning.create_trajectory_optim_agent_for_model(
         model_env,
         agent_cfg,
-        num_particles=20
+        num_particles=agent_params["num_of_particles"],
     )
 
     # create buffer
@@ -281,9 +337,23 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
     )
 
     # Create a trainer for the model
-    model_trainer = models.ModelTrainer(dynamics_model, optim_lr=1e-4, weight_decay=1e-4)
+    model_trainer = models.ModelTrainer(dynamics_model, optim_lr=model_params["model_lr"], weight_decay=model_params["model_wd"])
+
+    # Save training pets param file
+    pets_dict = {
+        "rl_params": rl_training_params,
+        "model_params": model_params,
+        "agent_params": agent_params
+    }
+    pets_params = omegaconf.OmegaConf.create(pets_dict)
 
     # Saving config files
+    pets_param_filename = 'pets_params'
+    pets_param_dir = os.path.join(work_dir, pets_param_filename)
+    omegaconf.OmegaConf.save(config=pets_params, f=pets_param_dir) 
+    loaded = omegaconf.OmegaConf.load(pets_param_dir)
+    assert pets_params == loaded
+
     config_filename = 'cfg_dict'
     config_dir = os.path.join(work_dir, config_filename)
     omegaconf.OmegaConf.save(config=cfg, f=config_dir) 
@@ -399,8 +469,8 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
                 model_trainer.train(
                     dataset_train, 
                     dataset_val=dataset_val, 
-                    num_epochs=25, 
-                    patience=25, 
+                    num_epochs=model_params['num_epochs_train_model'], 
+                    patience=model_params['patience'], 
                     callback=train_callback,
                     silent=True)
                 # train_time = time.time() - start_train_time
@@ -499,6 +569,11 @@ def train_and_plot(num_trials, model_filename, eval_best, record_video):
         # np.save(os.path.join(work_dir, 'training_rewards.npy'), all_train_rewards)
         fig.savefig(os.path.join(work_dir, "output_train.png"))        
         plt.close(fig)
+
+        # Plot losses at the end of each epoch
+        data = [train_losses, val_scores]
+        ylabels = ["Train loss", "Val score"]
+        plot_and_save(data, ylabel=ylabels, work_dir=work_dir)
 
         if (trial+1) % save_model_freqency  == 0 and trial >= start_saving:
             eval_result = np.stack((total_steps_eval[1:], all_eval_rewards[1:]), axis=-1)

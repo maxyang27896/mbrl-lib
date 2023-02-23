@@ -11,6 +11,7 @@ notebooks/saved_model
 notebooks/training_cfg
 notebooks/training_model
 notebooks/training_model_1
+notebooks/trained_mbpo
 _build
 __pycache__
 

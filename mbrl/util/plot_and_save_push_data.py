@@ -4,6 +4,21 @@ import pandas as pd
 import os, sys, shutil
 
 
+def clear_and_create_dir(dir):
+    if not os.path.exists(dir):
+        os.mkdir(dir)
+    else:
+        for filename in os.listdir(dir):
+            file_path = os.path.join(dir, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print('Failed to delete %s. Reason: %s' % (file_path, e))
+
+
 def plot_and_save_push_plots(env, data, data_columns, trials, directory, result_type):
 
     # create dataframe

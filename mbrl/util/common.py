@@ -155,6 +155,8 @@ def create_replay_buffer(
     collect_trajectories: bool = False,
     rng: Optional[np.random.Generator] = None,
     next_obs_shape: Sequence[int] = None,
+    goal_shape: Sequence[int] = None,
+    goal_type: Type = np.float32,
 ) -> ReplayBuffer:
     """Creates a replay buffer from a given configuration.
 
@@ -213,6 +215,8 @@ def create_replay_buffer(
         rng=rng,
         max_trajectory_length=maybe_max_trajectory_len,
         next_obs_shape=next_obs_shape,
+        goal_shape=goal_shape,
+        goal_type=goal_type,
     )
 
     if load_dir:
@@ -524,6 +528,7 @@ def rollout_agent_trajectories(
     collect_full_trajectories: bool = False,
     agent_uses_low_dim_obs: bool = False,
     stacking: bool = False,
+    store_goals: bool = False,
 ) -> List[float]:
     """Rollout agent trajectories in the given environment.
 
@@ -577,7 +582,8 @@ def rollout_agent_trajectories(
         agent.reset()
         done = False
         total_reward = 0.0
-        stacked_action = deque(np.zeros((env.states_stacked_len, *env.action_space.shape)), maxlen=env.states_stacked_len)
+        if stacking:
+            stacked_action = deque(np.zeros((env.states_stacked_len, *env.action_space.shape)), maxlen=env.states_stacked_len)
         while not done:
             if replay_buffer is not None:
                 if stacking:
@@ -590,6 +596,7 @@ def rollout_agent_trajectories(
                     callback=callback,
                     agent_uses_low_dim_obs=agent_uses_low_dim_obs,
                     stacked_action=stacked_action,
+                    store_goals=store_goals,
                 )
                 else:
                     next_obs, reward, done, info = step_env_and_add_to_buffer(
@@ -692,6 +699,7 @@ def step_env_and_add_to_buffer_stacked(
     callback: Optional[Callable] = None,
     agent_uses_low_dim_obs: bool = False,
     stacked_action: deque = None, 
+    store_goals: bool = False,
 ) -> Tuple[np.ndarray, float, bool, Dict]:
     """Steps the environment with an agent's action and populates the replay buffer.
 
@@ -724,14 +732,21 @@ def step_env_and_add_to_buffer_stacked(
     if agent_uses_low_dim_obs:
         agent_obs = getattr(env, "get_last_low_dim_obs")()
     else:
-        agent_obs = obs.reshape(-1)
+        if isinstance(agent, mbrl.planning.sac_wrapper.SACAgent) and env.observation_mode == 'tactile_pose_relative_data':
+            agent_obs = env.get_goal_aware_tactile_pose_relative_obs()
+        else:
+            agent_obs = obs.reshape(-1)
+
     if not isinstance(stacked_action, deque):
         stacked_action = deque(np.zeros((env.states_stacked_len, *env.action_space.shape)), maxlen=env.states_stacked_len)
     action = agent.act(agent_obs, np.array(stacked_action).reshape(-1), **agent_kwargs)
     next_obs, reward, done, info = env.step(action)
     stacked_action.append(action)
     action = np.array(stacked_action).reshape(-1)
-    replay_buffer.add(obs.reshape(-1), action, next_obs[-1], reward, done)
+    if store_goals:
+        replay_buffer.add(obs.reshape(-1), action, next_obs[-1], reward, done, env.get_goal_obs())
+    else:
+        replay_buffer.add(obs.reshape(-1), action, next_obs[-1], reward, done)
     if callback:
         callback((env, obs.reshape(-1), action.reshape(-1), next_obs[-1], reward, done, info))
     return next_obs, reward, done, info

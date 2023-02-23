@@ -141,7 +141,7 @@ class OneDTransitionRewardModel(Model):
     def _process_batch(
         self, batch: mbrl.types.TransitionBatch, _as_float: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        obs, action, next_obs, reward, _ = batch.astuple()
+        obs, action, next_obs, reward, *_ = batch.astuple()
         if self.target_is_delta:
             if self.using_history_of_obs:
                 target_obs = next_obs - obs[..., -next_obs.shape[-1]:] # Get last state from obs
