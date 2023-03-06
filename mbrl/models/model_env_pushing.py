@@ -220,7 +220,7 @@ class ModelEnvPushing:
         next_obs: torch.Tensor
     ):
 
-        if self.observation_mode == 'tactile_pose_goal_excluded_data':
+        if self.observation_mode == 'tactile_pose_goal_excluded_data' or self.observation_mode == 'tactile_pose_relative_data':
             if self.planar_states == True:
                 goal_rpy_workframe_batch = torch.zeros((len(next_obs), 3), dtype=torch.float32).to(self.device)
                 goal_rpy_workframe_batch[:, 2] = torch.atan2(-next_obs[:, 5] + self.goal_pos_workframe_batch[:, 1], 
