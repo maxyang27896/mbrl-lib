@@ -25,7 +25,6 @@ from mbrl.util.plot_and_save_push_data import plot_and_save_training, plot_and_s
 
 import tactile_gym.rl_envs
 from tactile_gym.sb3_helpers.params import import_parameters
-from tactile_gym.rl_envs.nonprehensile_manipulation.object_push.object_push_env import get_states_from_obs
 
 from pyvirtualdisplay import Display
 _display = Display(visible=False, size=(1400, 900))
