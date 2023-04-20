@@ -515,6 +515,16 @@ def quantize_obs(
 # Coordinate transformations
 # ------------------------------------------------------------------------ #
 
+
+def euler_to_quat(euler: np.ndarray):
+    
+        qx = np.sin(euler[0]/2) * np.cos(euler[1]/2) * np.cos(euler[2]/2) - np.cos(euler[0]/2) * np.sin(euler[1]/2) * np.sin(euler[2]/2)
+        qy = np.cos(euler[0]/2) * np.sin(euler[1]/2) * np.cos(euler[2]/2) + np.sin(euler[0]/2) * np.cos(euler[1]/2) * np.sin(euler[2]/2)
+        qz = np.cos(euler[0]/2) * np.cos(euler[1]/2) * np.sin(euler[2]/2) - np.sin(euler[0]/2) * np.sin(euler[1]/2) * np.cos(euler[2]/2)
+        qw = np.cos(euler[0]/2) * np.cos(euler[1]/2) * np.cos(euler[2]/2) + np.sin(euler[0]/2) * np.sin(euler[1]/2) * np.sin(euler[2]/2)
+        return np.array([qx, qy, qz, qw])
+
+
 def euler_to_quaternion(euler: torch.Tensor) -> torch.Tensor:
     ''' 
     Convert a batch of euler angles to a batch of 4 dimenstional quaternian
